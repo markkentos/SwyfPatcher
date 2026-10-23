@@ -1,0 +1,13 @@
+# Build/test artifacts
+bin/
+obj/
+*.swyf-*.tmp
+*.swyf-*.original
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+# Local analysis dumps
+*.log
+*.report.txt
