@@ -1,27 +1,31 @@
-# SwyfPatcher - universal Qwen3 TTS patch for "Scam With Your Friends"
+﻿# SwyfPatcher - universal Qwen3 TTS patch for "Scam With Your Friends"
 # Enables the local Qwen3 neural TTS on modest hardware, lets you switch
 # the inference backend (Vulkan / CPU) and swap the talker model (Q4_K_M / Q8_0).
+# Double-click opens an interactive menu; command-line flags work for scripting.
 #
 # Original fix: psihozniy (hardware-eligibility + timeout patch, v2.1 lineage).
 # Adapted, rewritten as a dependency-free PowerShell tool and maintained by markkentos.
-# Some ideas (model switching, Steam libraryfolders.vdf discovery, interactive hints)
-# borrowed from the community SwyfPatcher-2.6.0 fork.
+# Some ideas (model switching, Steam libraryfolders.vdf discovery, menu, model-verify
+# bypass) borrowed from the community SwyfPatcher-2.6.0 fork.
 #
-# Usage:  SwyfPatch.bat [--backend auto|cpu|vulkan] [--model q4|q8] [--check | --restore] [game-folder]
+# Usage:  SwyfPatch.bat                          (interactive menu)
+#         SwyfPatch.bat [--backend auto|cpu|vulkan] [--model q4|q8] [--check | --restore] [-NonInteractive] [game-folder]
 
 param(
     [string]$Backend = 'auto',
     [string]$Model = '',
     [switch]$Check,
     [switch]$Restore,
+    [switch]$NonInteractive,
     [string]$GamePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '2.7'
+$Version = '2.8'
 $GameName = 'Scam With Your Friends'
 $Code = 0
 
+# ---------- helpers ----------
 function HexToBytes([string]$s) {
     $n = [int]($s.Length / 2)
     $r = New-Object byte[] $n
@@ -56,6 +60,9 @@ function ReplaceVerified([string]$dllPath, [byte[]]$expectedCurrent, [byte[]]$ne
         if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force }
     }
 }
+function Write-Ok([string]$m)   { Write-Host "[OK] $m" -ForegroundColor Green }
+function Write-Warn2([string]$m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
+function Write-Info2([string]$m){ Write-Host "[INFO] $m" -ForegroundColor Cyan }
 
 # Patched HardwareEligible bodies (141 bytes each; ldstr tokens differ per build, shape identical):
 #   auto:   VRAM>=1024 -> out="Vulkan0" else out="CPU"; always return true
@@ -134,8 +141,16 @@ $Builds = @(
     }
 )
 
+# sanity: patch tables must be complete (141 bytes = 282 hex chars)
+foreach ($b in $Builds) {
+    if ($b.HwBefore.Length -ne 282) { throw "Internal error: HwBefore length for $($b.Tag) is $($b.HwBefore.Length), expected 282." }
+    foreach ($k in $b.Blocks.Keys) {
+        if ($b.Blocks[$k].Length -ne 282) { throw "Internal error: Block '$k' length for $($b.Tag) is $($b.Blocks[$k].Length), expected 282." }
+    }
+}
+
 # Legacy (pre-2.7) patched states of build 2026-10-22 without the model-verify edit.
-# They are recognized and silently upgraded to the v2.7 variant on the next patch run.
+# They are recognized and silently upgraded to the v2.7+ variant on the next patch run.
 $LegacyPatched = @{
     'F94B92369D2AC0F7C1F10A30AE6A1C7FC4CEE99C538693C162B1A7FDC02A2BB2' = @{
         '7FB0CD47103813A740E5CF5755055DFC11AF3E2F3A8F4F0F14296121C90C27B3' = 'auto'
@@ -144,56 +159,46 @@ $LegacyPatched = @{
     }
 }
 
-try {
-    # ---------- normalize arguments ----------
-    $Backend = $Backend.ToLowerInvariant()
-    if ($Backend -notin @('auto', 'cpu', 'vulkan')) { throw "Invalid --backend value: $Backend (use auto, cpu or vulkan)." }
-    $action = 'patch'
-    if ($Restore) { $action = 'restore' }
-    elseif ($Check) { $action = 'check' }
-    $Model = $Model.ToLowerInvariant()
-    if ($Model -and $Model -notin @('q4', 'q8')) { throw "Invalid --model value: $Model (use q4 or q8)." }
-
-    # ---------- locate the game ----------
-    if ($GamePath) {
-        if (-not (Test-Path -LiteralPath $GamePath)) { throw "Game folder not found: $GamePath" }
-        $game = (Resolve-Path -LiteralPath $GamePath).Path
-    } else {
-        $dirs = New-Object 'System.Collections.Generic.HashSet[string]'
-        # 1) Steam libraries from registry + libraryfolders.vdf (idea borrowed from the 2.6.0 fork)
-        $steamRoots = @()
-        $sp = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
-        if ($sp) { $steamRoots += $sp }
-        if (Test-Path 'C:\Program Files (x86)\Steam') { $steamRoots += 'C:\Program Files (x86)\Steam' }
-        foreach ($root in $steamRoots) {
-            $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
-            if (Test-Path -LiteralPath $vdf) {
-                foreach ($m in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw), '"path"\s+"([^"]+)"')) {
-                    [void]$dirs.Add(($m.Groups[1].Value -replace '\\\\', '\'))
-                }
-            }
-            [void]$dirs.Add($root)
-        }
-        # 2) fallback: fixed layouts on every fixed drive
-        foreach ($drv in [IO.DriveInfo]::GetDrives()) {
-            if (-not $drv.IsReady) { continue }
-            foreach ($rel in @('SteamLibrary\steamapps\common', 'Program Files (x86)\Steam\steamapps\common', 'Steam\steamapps\common', 'Program Files (x86)\steamapps\common')) {
-                [void]$dirs.Add((Join-Path (Join-Path $drv.RootDirectory.FullName $rel) ''))
-            }
-        }
-        $found = New-Object 'System.Collections.Generic.List[string]'
-        foreach ($d in $dirs) {
-            $p = Join-Path $d $GameName
-            if (Test-Path -LiteralPath (Join-Path $p ($GameName + '_Data\Managed\Assembly-CSharp.dll'))) { $found.Add((Resolve-Path -LiteralPath $p).Path) }
-        }
-        if ($found.Count -gt 1) {
-            throw ("Several game folders found:`n" + (($found | ForEach-Object { '  ' + $_ }) -join "`n") + "`nDrag the correct folder onto SwyfPatch.bat.")
-        }
-        if ($found.Count -eq 0) { throw 'Game not found. Drag the game folder onto SwyfPatch.bat.' }
-        $game = $found[0]
+# ---------- game discovery ----------
+function Find-Game([string]$explicit) {
+    if ($explicit) {
+        if (-not (Test-Path -LiteralPath $explicit)) { throw "Game folder not found: $explicit" }
+        return (Resolve-Path -LiteralPath $explicit).Path
     }
-    Write-Host "Game: $game"
+    $dirs = New-Object 'System.Collections.Generic.HashSet[string]'
+    $steamRoots = @()
+    $sp = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
+    if ($sp) { $steamRoots += $sp }
+    if (Test-Path 'C:\Program Files (x86)\Steam') { $steamRoots += 'C:\Program Files (x86)\Steam' }
+    foreach ($root in $steamRoots) {
+        $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
+        if (Test-Path -LiteralPath $vdf) {
+            foreach ($m in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw), '"path"\s+"([^"]+)"')) {
+                [void]$dirs.Add(($m.Groups[1].Value -replace '\\\\', '\'))
+            }
+        }
+        [void]$dirs.Add($root)
+    }
+    foreach ($drv in [IO.DriveInfo]::GetDrives()) {
+        if (-not $drv.IsReady) { continue }
+        foreach ($rel in @('SteamLibrary\steamapps\common', 'Program Files (x86)\Steam\steamapps\common', 'Steam\steamapps\common', 'Program Files (x86)\steamapps\common')) {
+            [void]$dirs.Add((Join-Path (Join-Path $drv.RootDirectory.FullName $rel) ''))
+        }
+    }
+    $found = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($d in $dirs) {
+        $p = Join-Path $d $GameName
+        if (Test-Path -LiteralPath (Join-Path $p ($GameName + '_Data\Managed\Assembly-CSharp.dll'))) { $found.Add((Resolve-Path -LiteralPath $p).Path) }
+    }
+    if ($found.Count -gt 1) {
+        throw ("Several game folders found:`n" + (($found | ForEach-Object { '  ' + $_ }) -join "`n") + "`nDrag the correct folder onto SwyfPatch.bat.")
+    }
+    if ($found.Count -eq 0) { throw 'Game not found. Drag the game folder onto SwyfPatch.bat.' }
+    return $found[0]
+}
 
+# ---------- context ----------
+function Get-Context([string]$game) {
     $managed = Join-Path $game ($GameName + '_Data\Managed')
     $dll = Join-Path $managed 'Assembly-CSharp.dll'
     $scripts = Join-Path $managed 'ScriptsAssDef.dll'
@@ -201,13 +206,9 @@ try {
     if (-not (Test-Path -LiteralPath $dll)) { throw 'Assembly-CSharp.dll not found. Point me at the game root folder.' }
     if (-not (Test-Path -LiteralPath $scripts)) { throw 'ScriptsAssDef.dll not found. Verify files in Steam. No changes made.' }
 
-    # ---------- identify build and current state ----------
     $current = [IO.File]::ReadAllBytes($dll)
     $curHash = Sha256Hex $current
-    $build = $null
-    $already = $false
-    $curVariant = $null
-    $legacy = $false
+    $build = $null; $already = $false; $curVariant = $null; $legacy = $false
     foreach ($b in $Builds) {
         if ($curHash -eq $b.Original) { $build = $b; break }
         foreach ($v in @('auto', 'cpu', 'vulkan')) {
@@ -223,108 +224,51 @@ try {
     if ($null -eq $build) {
         throw ("Unsupported Assembly-CSharp.dll (SHA-256 $curHash).`nSteam likely updated the game. Verify files in Steam; this patcher needs an adaptation for the new build. No changes made.")
     }
-    if (-not $build.Patched[$Backend] -or -not $build.Blocks[$Backend]) {
-        throw ("--backend $Backend is not supported for build $($build.Tag). Use --backend auto. No changes made.")
-    }
-    $state = 'original'
-    if ($already) {
-        $state = "PATCHED (backend: $curVariant$(if ($legacy) { ', legacy layout' }))".Replace('  ', ' ')
-    }
-    Write-Host ("SwyfPatcher v$Version. Build: " + $build.Tag + " (state: $state)")
-
     if ((Sha256Hex ([IO.File]::ReadAllBytes($scripts))) -ne $build.Scripts) { throw 'Unsupported ScriptsAssDef.dll. Verify files in Steam. No changes made.' }
     if ($build.Speech) {
         if (-not (Test-Path -LiteralPath $speech)) { throw 'Kolkata.Speech.dll is missing. Verify files in Steam. No changes made.' }
         if ((Sha256Hex ([IO.File]::ReadAllBytes($speech))) -ne $build.Speech) { throw 'Unsupported Kolkata.Speech.dll. Verify files in Steam. No changes made.' }
     }
-    Write-Host '[OK] All game DLL hashes match a supported build.'
-
-    if ($action -ne 'check' -or $Model) {
-        $procs = @()
-        $procs += Get-Process -Name $GameName -ErrorAction SilentlyContinue
-        $procs += Get-Process -Name 'QwenTtsWorker' -ErrorAction SilentlyContinue
-        if ($procs) { throw 'Close the game first (Scam With Your Friends / QwenTtsWorker are running). No changes made.' }
+    return [pscustomobject]@{
+        Game = $game; Dll = $dll; Current = $current; CurHash = $curHash
+        Build = $build; Already = $already; CurVariant = $curVariant; Legacy = $legacy
     }
+}
 
-    # ---------- model switch (--model q4|q8), independent of DLL patching ----------
-    if ($Model) {
-        $base = Join-Path $env:USERPROFILE 'AppData\LocalLow\Jatater Worldwide\Scam With Your Friends\qwen3-tts'
-        $sub = Get-ChildItem $base -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $sub) { throw "Qwen model cache not found under $base. Launch the game once so it downloads the models." }
-        $mdir = $sub.FullName
-        $active = Join-Path $mdir 'qwen-talker-0.6b-base-Q8_0.gguf'
-        $orig = Join-Path $mdir 'qwen-talker-0.6b-base-Q8_0.original.gguf'
-        $q4 = Join-Path $mdir 'qwen-talker-0.6b-base-Q4_K_M.gguf'
-        if (-not (Test-Path -LiteralPath $active)) { throw "Active talker model not found: $active" }
-        $activeMb = [math]::Round((Get-Item -LiteralPath $active).Length / 1MB)
-        $activeKind = if ($activeMb -lt 700) { 'q4' } else { 'q8' }
-        Write-Host ("Current talker model: $activeKind (~$activeMb MB)")
-
-        if ($Model -eq $activeKind) {
-            Write-Host "[OK] Model $Model is already active. Nothing to do."
-        } elseif ($Model -eq 'q4') {
-            if (-not (Test-Path -LiteralPath $q4)) {
-                # seed from the pre-built local copy, then fall back to mirrors
-                $seed = 'D:\Temp\swyf-quant\qwen-talker-q4km-final.gguf'
-                if (Test-Path -LiteralPath $seed) {
-                    Copy-Item -LiteralPath $seed -Destination $q4 -Force
-                    Write-Host "[OK] Seeded Q4_K_M from local pre-built copy ($seed)"
-                } else {
-                    $mirrors = @(
-                        'https://hf.aihoster.ru/Serveurperso/Qwen3-TTS-GGUF/resolve/main/qwen-talker-0.6b-base-Q4_K_M.gguf',
-                        'https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/main/qwen-talker-0.6b-base-Q4_K_M.gguf',
-                        'https://hf-mirror.com/Serveurperso/Qwen3-TTS-GGUF/resolve/main/qwen-talker-0.6b-base-Q4_K_M.gguf'
-                    )
-                    $ok = $false
-                    foreach ($u in $mirrors) {
-                        try {
-                            Write-Host "[INFO] Downloading Q4_K_M from $u"
-                            Invoke-WebRequest -Uri $u -OutFile $q4 -UseBasicParsing -TimeoutSec 1800
-                            $ok = $true; break
-                        } catch { Write-Host "[WARN] Mirror failed: $($_.Exception.Message)" }
-                    }
-                    if (-not $ok) { throw "Q4_K_M download failed. Place 'qwen-talker-0.6b-base-Q4_K_M.gguf' into $mdir manually." }
-                }
-            }
-            if (-not (Test-Path -LiteralPath $orig)) {
-                if ($activeKind -eq 'q8') { Copy-Item -LiteralPath $active -Destination $orig -Force }
-            }
-            if (-not (Test-Path -LiteralPath $orig)) { throw 'Original Q8_0 backup missing; refusing to overwrite the active model.' }
-            Copy-Item -LiteralPath $q4 -Destination $active -Force
-            Write-Host "[OK] Q4_K_M model activated (~2x faster inference). Original Q8_0 kept as: $orig"
-        } else {
-            if (Test-Path -LiteralPath $orig) {
-                Copy-Item -LiteralPath $orig -Destination $active -Force
-                Write-Host '[OK] Standard Q8_0 model restored.'
-            } else {
-                throw "Original Q8_0 backup not found ($orig). Launch the game to re-download it."
-            }
+function Assert-GameClosed([bool]$allowKillPrompt) {
+    $procs = @()
+    $procs += Get-Process -Name $GameName -ErrorAction SilentlyContinue
+    $procs += Get-Process -Name 'QwenTtsWorker' -ErrorAction SilentlyContinue
+    if (-not $procs) { return }
+    $names = ($procs | ForEach-Object { $_.ProcessName } | Select-Object -Unique) -join ', '
+    if ($allowKillPrompt -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        Write-Warn2 ("Running process detected: $names")
+        $ans = (Read-Host 'Close it automatically? (Y/N)').Trim().ToUpperInvariant()
+        if ($ans -eq 'Y') {
+            $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 800
+            if (Get-Process -Name $GameName -ErrorAction SilentlyContinue) { throw 'Could not close the game. Close it manually. No changes made.' }
+            Write-Ok 'Game closed.'
+            return
         }
+        throw "Close $names before applying changes. No changes made."
     }
+    throw "Close the game first ($names is running). No changes made."
+}
 
-    # ---------- restore ----------
-    if ($action -eq 'restore') {
-        if (-not $already) { Write-Host '[OK] DLL is already original. Nothing to restore.'; exit 0 }
-        $bp = Get-ExistingBackup $dll
-        if (-not $bp) { throw 'No backup found next to the DLL. Use Steam file verification to restore.' }
-        $backupBytes = [IO.File]::ReadAllBytes($bp)
-        if ((Sha256Hex $backupBytes) -ne $build.Original) { throw "Backup $bp is invalid or for another build. Use Steam file verification." }
-        ReplaceVerified $dll $current $backupBytes $build.Original
-        Write-Host "[OK] Original DLL restored from: $bp"
-        Write-Host 'Voice preferences can be changed in the game settings.'
-        exit 0
+# ---------- actions ----------
+function Invoke-Check([pscustomobject]$ctx, [string]$backend) {
+    if (-not $ctx.Build.Patched[$backend] -or -not $ctx.Build.Blocks[$backend]) {
+        throw ("--backend $Backend is not supported for build $($ctx.Build.Tag). Use --backend auto.")
     }
-
-    # ---------- patch / check ----------
-    $edits = @($build.Edits) + @(@{
-        o = $build.HwOffset; b = $build.HwBefore; a = $build.Blocks[$Backend]
-        d = ("Hardware eligibility: allow; backend -> " + $Backend)
+    $edits = @($ctx.Build.Edits) + @(@{
+        o = $ctx.Build.HwOffset; b = $ctx.Build.HwBefore; a = $ctx.Build.Blocks[$backend]
+        d = ("Hardware eligibility: allow; backend -> " + $backend)
     })
-
-    $source = [byte[]]$current.Clone()
-    if ($already) {
+    $source = [byte[]]$ctx.Current.Clone()
+    if ($ctx.Already) {
         foreach ($e in $edits) { CopyInto $source $e.o (HexToBytes $e.b) }
-        if ((Sha256Hex $source) -ne $build.Original) { throw 'Patched-state reconstruction failed. No changes made.' }
+        if ((Sha256Hex $source) -ne $ctx.Build.Original) { throw 'Patched-state reconstruction failed. No changes made.' }
     }
     foreach ($e in $edits) {
         if (-not (MatchesAt $source $e.o (HexToBytes $e.b))) { throw ("Unexpected code bytes: " + $e.d + ". No changes made.") }
@@ -334,57 +278,254 @@ try {
         CopyInto $output $e.o (HexToBytes $e.a)
         Write-Host ("[OK] " + $e.d)
     }
-    $outHash = Sha256Hex $output
-    if ($outHash -ne $build.Patched[$Backend]) { throw ("Output hash mismatch (" + $outHash + "). No changes made.") }
+    if ((Sha256Hex $output) -ne $ctx.Build.Patched[$backend]) { throw ("Output hash mismatch (" + (Sha256Hex $output) + "). No changes made.") }
+    Write-Host '[OK] CHECK ONLY. No game files or settings were changed.'
+}
 
-    if ($action -eq 'check') {
-        Write-Host '[OK] CHECK ONLY. No game files or settings were changed.'
-        exit 0
+function Invoke-Patch([pscustomobject]$ctx, [string]$backend) {
+    if (-not $ctx.Build.Patched[$backend] -or -not $ctx.Build.Blocks[$backend]) {
+        throw ("--backend $Backend is not supported for build $($ctx.Build.Tag). Use --backend auto. No changes made.")
     }
+    $edits = @($ctx.Build.Edits) + @(@{
+        o = $ctx.Build.HwOffset; b = $ctx.Build.HwBefore; a = $ctx.Build.Blocks[$backend]
+        d = ("Hardware eligibility: allow; backend -> " + $backend)
+    })
+    $source = [byte[]]$ctx.Current.Clone()
+    if ($ctx.Already) {
+        foreach ($e in $edits) { CopyInto $source $e.o (HexToBytes $e.b) }
+        if ((Sha256Hex $source) -ne $ctx.Build.Original) { throw 'Patched-state reconstruction failed. No changes made.' }
+    }
+    foreach ($e in $edits) {
+        if (-not (MatchesAt $source $e.o (HexToBytes $e.b))) { throw ("Unexpected code bytes: " + $e.d + ". No changes made.") }
+    }
+    $output = [byte[]]$source.Clone()
+    foreach ($e in $edits) { CopyInto $output $e.o (HexToBytes $e.a) }
+    if ((Sha256Hex $output) -ne $ctx.Build.Patched[$backend]) { throw ("Output hash mismatch (" + (Sha256Hex $output) + "). No changes made.") }
 
-    $ownBackup = $dll + '.swyf.original'
+    $ownBackup = $ctx.Dll + '.swyf.original'
     $bp = $null
     foreach ($s in @('.swyf.original', '.swyf-v23.original', '.swyf-v22.original')) {
-        $cand = $dll + $s
+        $cand = $ctx.Dll + $s
         if (Test-Path -LiteralPath $cand) {
-            if ((Sha256Hex ([IO.File]::ReadAllBytes($cand))) -eq $build.Original) { $bp = $cand; break }
+            if ((Sha256Hex ([IO.File]::ReadAllBytes($cand))) -eq $ctx.Build.Original) { $bp = $cand; break }
         }
     }
     if ($bp) {
-        Write-Host "[OK] Using existing backup: $bp"
+        Write-Ok "Using existing backup: $bp"
     } else {
         # a stale backup from another game build is overwritten; Steam can always restore any build
         [IO.File]::WriteAllBytes($ownBackup, $source)
-        if ((Sha256Hex ([IO.File]::ReadAllBytes($ownBackup))) -ne $build.Original) { throw 'Backup verification failed. No changes made.' }
+        if ((Sha256Hex ([IO.File]::ReadAllBytes($ownBackup))) -ne $ctx.Build.Original) { throw 'Backup verification failed. No changes made.' }
         $bp = $ownBackup
-        Write-Host "[INFO] Previous backup was for another build; wrote fresh backup: $bp"
+        Write-Info2 "Previous backup was for another build; wrote fresh backup: $bp"
     }
 
-    if ($curHash -eq $outHash) {
-        Write-Host "[OK] Already patched (backend: $Backend). DLL left unchanged."
+    foreach ($e in $edits) { Write-Host ("[OK] " + $e.d) }
+    if ($ctx.CurHash -eq (Sha256Hex $output)) {
+        Write-Ok "Already patched (backend: $backend). DLL left unchanged."
     } else {
-        ReplaceVerified $dll $current $output $build.Patched[$Backend]
-        if ($already -or $legacy) {
-            Write-Host "[OK] DLL updated: $curVariant$(if ($legacy) { ' (legacy)' }) -> $Backend (v$Version layout)"
-        } else {
-            Write-Host "[OK] DLL patched (backend: $Backend). Backup: $bp"
-        }
+        ReplaceVerified $ctx.Dll $ctx.Current $output $ctx.Build.Patched[$backend]
+        if ($ctx.Already) { Write-Ok ("DLL updated (backend: $backend, v$Version layout)") }
+        else { Write-Ok ("DLL patched (backend: $backend). Backup: $bp") }
     }
 
-    # ---------- voice preferences ----------
     try {
         $key = 'HKCU:\Software\Jatater Worldwide\' + $GameName
         if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
         New-ItemProperty -Path $key -Name 'Kolkata.Qwen3Tts_h1324939569' -PropertyType DWord -Value 0 -Force | Out-Null
         New-ItemProperty -Path $key -Name 'Kolkata.Dev.RussianSpeechProvider_h3030369888' -PropertyType DWord -Value 0 -Force | Out-Null
-        Write-Host '[OK] Voice preference values written.'
+        Write-Ok 'Voice preference values written.'
     } catch {
-        $Code = 2
-        Write-Host ('[WARN] DLL is patched, but voice preference registry values were not saved: ' + $_.Exception.Message)
+        $script:Code = 2
+        Write-Warn2 ('DLL is patched, but voice preference registry values were not saved: ' + $_.Exception.Message)
         Write-Host 'Select Qwen3 for non-English speech in the game settings.'
     }
+}
+
+function Invoke-Restore([pscustomobject]$ctx) {
+    if (-not $ctx.Already) { Write-Ok 'DLL is already original. Nothing to restore.'; return }
+    $bp = Get-ExistingBackup $ctx.Dll
+    if (-not $bp) { throw 'No backup found next to the DLL. Use Steam file verification to restore.' }
+    $backupBytes = [IO.File]::ReadAllBytes($bp)
+    if ((Sha256Hex $backupBytes) -ne $ctx.Build.Original) { throw "Backup $bp is invalid or for another build. Use Steam file verification." }
+    ReplaceVerified $ctx.Dll $ctx.Current $backupBytes $ctx.Build.Original
+    Write-Ok "Original DLL restored from: $bp"
+    Write-Host 'Voice preferences can be changed in the game settings.'
+}
+
+function Get-QwenModelDir {
+    $base = Join-Path $env:USERPROFILE 'AppData\LocalLow\Jatater Worldwide\Scam With Your Friends\qwen3-tts'
+    $sub = Get-ChildItem $base -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $sub) { throw "Qwen model cache not found under $base. Launch the game once so it downloads the models." }
+    return $sub.FullName
+}
+function Get-ActiveModelKind {
+    $active = Join-Path (Get-QwenModelDir) 'qwen-talker-0.6b-base-Q8_0.gguf'
+    if (-not (Test-Path -LiteralPath $active)) { return 'none' }
+    $mb = [math]::Round((Get-Item -LiteralPath $active).Length / 1MB)
+    if ($mb -lt 700) { return 'q4' } else { return 'q8' }
+}
+function Invoke-ModelSwitch([string]$kind) {
+    $mdir = Get-QwenModelDir
+    $active = Join-Path $mdir 'qwen-talker-0.6b-base-Q8_0.gguf'
+    $orig = Join-Path $mdir 'qwen-talker-0.6b-base-Q8_0.original.gguf'
+    $q4 = Join-Path $mdir 'qwen-talker-0.6b-base-Q4_K_M.gguf'
+    if (-not (Test-Path -LiteralPath $active)) { throw "Active talker model not found: $active" }
+    $activeMb = [math]::Round((Get-Item -LiteralPath $active).Length / 1MB)
+    $activeKind = if ($activeMb -lt 700) { 'q4' } else { 'q8' }
+    Write-Host ("Current talker model: $activeKind (~$activeMb MB)")
+
+    if ($kind -eq $activeKind) { Write-Ok "Model $kind is already active. Nothing to do."; return }
+    if ($kind -eq 'q4') {
+        if (-not (Test-Path -LiteralPath $q4)) {
+            $seed = 'D:\Temp\swyf-quant\qwen-talker-q4km-final.gguf'
+            if (Test-Path -LiteralPath $seed) {
+                Copy-Item -LiteralPath $seed -Destination $q4 -Force
+                Write-Ok "Seeded Q4_K_M from local pre-built copy ($seed)"
+            } else {
+                $mirrors = @(
+                    'https://hf.aihoster.ru/Serveurperso/Qwen3-TTS-GGUF/resolve/main/qwen-talker-0.6b-base-Q4_K_M.gguf',
+                    'https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/main/qwen-talker-0.6b-base-Q4_K_M.gguf',
+                    'https://hf-mirror.com/Serveurperso/Qwen3-TTS-GGUF/resolve/main/qwen-talker-0.6b-base-Q4_K_M.gguf'
+                )
+                $ok = $false
+                foreach ($u in $mirrors) {
+                    try {
+                        Write-Info2 "Downloading Q4_K_M from $u"
+                        Invoke-WebRequest -Uri $u -OutFile $q4 -UseBasicParsing -TimeoutSec 1800
+                        $ok = $true; break
+                    } catch { Write-Warn2 "Mirror failed: $($_.Exception.Message)" }
+                }
+                if (-not $ok) { throw "Q4_K_M download failed. Place 'qwen-talker-0.6b-base-Q4_K_M.gguf' into $mdir manually." }
+            }
+        }
+        if (-not (Test-Path -LiteralPath $orig)) {
+            if ($activeKind -eq 'q8') { Copy-Item -LiteralPath $active -Destination $orig -Force }
+        }
+        if (-not (Test-Path -LiteralPath $orig)) { throw 'Original Q8_0 backup missing; refusing to overwrite the active model.' }
+        Copy-Item -LiteralPath $q4 -Destination $active -Force
+        Write-Ok "Q4_K_M model activated (~2x faster inference). Original Q8_0 kept as: $orig"
+    } else {
+        if (Test-Path -LiteralPath $orig) {
+            Copy-Item -LiteralPath $orig -Destination $active -Force
+            Write-Ok 'Standard Q8_0 model restored.'
+        } else {
+            throw "Original Q8_0 backup not found ($orig). Launch the game to re-download it."
+        }
+    }
+}
+
+function Show-Diagnostics {
+    $gpu = Get-CimInstance Win32_VideoController | Select-Object -First 1
+    $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+    $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+    Write-Host ('GPU: ' + $gpu.Name + ' | driver ' + $gpu.DriverVersion + ' (' + $gpu.DriverDate + ')')
+    Write-Host ('CPU: ' + $cpu.Name)
+    Write-Host ('RAM: ' + $ram + ' GB total')
+    Write-Host ''
+    Write-Host 'Tips:'
+    Write-Host ' - Intel Arc: if Vulkan gives noise instead of speech, use CPU backend and update the GPU driver.'
+    Write-Host ' - Choppy speech on CPU: switch to the Q4_K_M model, close the browser, use the high-performance power plan.'
+    Write-Host (' - Logs: ' + (Join-Path $env:USERPROFILE 'AppData\LocalLow\Jatater Worldwide\Scam With Your Friends\Player.log'))
+}
+
+# ---------- main ----------
+try {
+    $Backend = $Backend.ToLowerInvariant()
+    if ($Backend -notin @('auto', 'cpu', 'vulkan')) { throw "Invalid --backend value: $Backend (use auto, cpu or vulkan)." }
+    $Model = $Model.ToLowerInvariant()
+    if ($Model -and $Model -notin @('q4', 'q8')) { throw "Invalid --model value: $Model (use q4 or q8)." }
+    $script:Code = 0
+    $isCli = [bool]($Check -or $Restore -or $Model -or $NonInteractive)
+    $game = Find-Game $GamePath
+    Write-Host "Game: $game"
+
+    if (-not $isCli) {
+        # ---------------- interactive menu ----------------
+        while ($true) {
+            $ctx = Get-Context $game
+            $modelDir = try { Get-QwenModelDir } catch { $null }
+            $modelKind = if ($modelDir) { Get-ActiveModelKind } else { 'not downloaded' }
+            $state = 'original'
+            if ($ctx.Already) { $state = "PATCHED (backend: $($ctx.CurVariant)$(if ($ctx.Legacy) { ', legacy' }))" }
+            Write-Host ('=' * 70) -ForegroundColor DarkGray
+            Write-Host ("Build: $($ctx.Build.Tag) | State: $state | Model: $modelKind") -ForegroundColor Yellow
+            Write-Host ('=' * 70) -ForegroundColor DarkGray
+            Write-Host ''
+            Write-Host 'Select an action:' -ForegroundColor Green
+            Write-Host '  [1] Patch / Update (Auto: Vulkan0 if VRAM >= 1GB, else CPU)'
+            Write-Host '  [2] Backend: switch to CPU + patch (recommended for Intel Arc / iGPU)'
+            Write-Host '  [3] Backend: switch to Vulkan0 + patch (needs fresh GPU drivers)'
+            Write-Host '  [4] Model: switch to Q4_K_M (light, ~2x faster)'
+            Write-Host '  [5] Model: switch to Q8_0 (standard, best quality)'
+            Write-Host '  [6] Check integrity and status only'
+            Write-Host '  [7] Restore original DLL'
+            Write-Host '  [8] Diagnostics (hardware, tips, logs)'
+            Write-Host '  [0] Exit'
+            Write-Host ''
+            try { $choice = (Read-Host 'Choice [1-8, 0] (default: 1)').Trim() } catch { exit 0 }
+            if ($choice -eq '' -and [Console]::IsInputRedirected) { exit $script:Code }
+            $actBackend = $Backend; $actModel = ''; $doCheck = $false; $doRestore = $false
+            switch ($choice) {
+                '1' { $actBackend = $Backend }
+                '2' { $actBackend = 'cpu' }
+                '3' { $actBackend = 'vulkan' }
+                '4' { $actModel = 'q4' }
+                '5' { $actModel = 'q8' }
+                '6' { $doCheck = $true }
+                '7' { $doRestore = $true }
+                '8' { Show-Diagnostics }
+                '0' { Write-Host 'Exited by user.'; exit $script:Code }
+                default { $actBackend = $Backend }
+            }
+            if ($choice -in @('1', '2', '3', '4', '5', '7')) { Assert-GameClosed $true }
+            if ($doRestore) { Invoke-Restore $ctx }
+            elseif ($doCheck) { Invoke-Check $ctx $actBackend }
+            elseif ($actModel) { Invoke-ModelSwitch $actModel }
+            else { Invoke-Patch $ctx $actBackend }
+            Write-Host ''
+            if ([Console]::IsInputRedirected) { exit $script:Code }
+            Write-Host 'Press Enter to return to the menu...' -ForegroundColor Gray
+            try { [void][Console]::ReadLine() } catch { exit $script:Code }
+            Write-Host ''
+        }
+    }
+
+    # ---------------- CLI mode ----------------
+    $ctx = Get-Context $game
+    $state = 'original'
+    if ($ctx.Already) { $state = "PATCHED (backend: $($ctx.CurVariant)$(if ($ctx.Legacy) { ', legacy' }))" }
+    Write-Host ("SwyfPatcher v$Version. Build: $($ctx.Build.Tag) (state: $state)")
+    Write-Ok 'All game DLL hashes match a supported build.'
+
+    if ($Model) {
+        Assert-GameClosed $false
+        Invoke-ModelSwitch $Model
+    }
+    if ($Restore) {
+        Assert-GameClosed $false
+        Invoke-Restore $ctx
+        Write-Host 'Done.'
+        exit $script:Code
+    }
+    if ($Check -and -not $Model) {
+        Invoke-Check $ctx $Backend
+        exit $script:Code
+    }
+    if ($Check) {
+        # --model combined with --check: model switched above, DLL check is informational
+        Invoke-Check $ctx $Backend
+        Write-Host 'Done.'
+        exit $script:Code
+    }
+    if ($Model) {
+        Write-Host 'Done.'
+        exit $script:Code
+    }
+    Assert-GameClosed $false
+    Invoke-Patch $ctx $Backend
     Write-Host 'Done. Start the game and test voice generation.'
-    exit $Code
+    exit $script:Code
 } catch {
     Write-Host ''
     Write-Host ('[FAIL] ' + $_.Exception.Message)
