@@ -1,125 +1,106 @@
-# SwyfPatcher
+# SwyfPatcher 2.9.0
 
-**Универсальный неофициальный патчер для игры [Scam With Your Friends](https://store.steampowered.com/app/2946220/)** — включает локальную нейроозвучку **Qwen3 TTS** на слабом железе, чинит таймауты генерации и позволяет переключать бэкенд вывода (Vulkan / CPU) одной командой.
+**Русский / English.** Патчер Qwen3 TTS для предоставленной Windows-сборки **Scam With Your Friends 0.1.89-swyf**. Один экран, **9 пунктов вместе с выходом**, без вложенных меню. Windows PowerShell 5.1; Python и SDK для использования не нужны.
 
-> ⚠️ Патч неофициальный, поставляется «как есть». Авторы патча не связаны с разработчиками игры (Jatater Worldwide) и Alibaba (Qwen3-TTS). Используйте на свой страх и риск.
+Описание релиза: [SwyfPatcher v2.9.0](docs/RELEASE_NOTES.md).
 
----
+## Быстрый тест Q4 / Quick Q4 test
 
-## Возможности
+1. Распакуйте всю папку, включая `src` и `payload`. Закройте игру и `QwenTtsWorker`.
+2. Запустите `SwyfPatch.bat`. Если игра не найдена, перетащите её папку на BAT.
+3. **5 → Q4**, затем **4 → GPU**, затем **7 → запуск с логами**. Переключение модели и обработки также применяет актуальный патч и устанавливает обновлённый воркер.
+4. Проверьте голос. После выхода из игры архив появится в `logs/test-*.zip`. Оставьте окно патчера открытым.
 
-- ✅ Снимает программное ограничение железа (`HardwareEligible` всегда возвращает `true`) — локальный Qwen3 запускается на ноутбуках и iGPU
-- ✅ Бэкенд на выбор: `auto` (VRAM ≥ 1024 МБ → Vulkan0, иначе CPU), принудительный `cpu` или `vulkan` — переключение **на живой DLL**, без переустановки
-- ✅ Щедрые таймауты: подготовка 20→120 с (×2), отмена запроса 30→300 с, первый звук 20→300 с, фрагмент 30→120 с
-- ✅ Образец голоса 10→3 секунды — быстрее префилл при сохранении качества клона
-- ✅ Проверка совместимости по точным SHA-256 **до** любых изменений; атомарная замена файла
-- ✅ Автоматический резервный бэкап и откат одной командой
-- ✅ Автопоиск игры на всех дисках (SteamLibrary / Steam / произвольные библиотеки)
-- ✅ Никаких зависимостей: чистый PowerShell — есть в любой Windows 10/11. Нужен только .bat + .ps1 из репозитория
+Extract the complete folder, close the game and its Qwen worker, then run `SwyfPatch.bat`. Select **5 (Q4) → 4 (GPU) → 7 (launch + logs)**. Keep the patcher open until the game exits; collect `logs/test-*.zip`. Drag the game folder onto the BAT if automatic discovery fails.
 
-## Быстрый старт
+**Устранение рычания на NVIDIA ещё требует пользовательского теста.** На Mac проверены синтез Q4/Q8 через совместимый CPU runtime и протокол нового воркера; Windows/Vulkan на RTX 3050 здесь не запускался. Это сборка с изменением вычислительного режима Q4 для проверки, а не подтверждение исправленного звука на этой видеокарте.
 
-1. Полностью закройте игру.
-2. Скачайте репозиторий (Code → Download ZIP, либо `git clone`).
-3. Запустите `SwyfPatch.bat` — откроется **интерактивное меню**: патч, переключение бэкенда CPU/Vulkan, переключение модели Q4_K_M/Q8_0, проверка, откат, диагностика.
-4. Запустите игру. При первом использовании озвучки игра предложит скачать модели Qwen3 (~1.2 ГБ) — согласитесь.
+**The NVIDIA audio fix still needs a Windows test.** CPU synthesis, the worker protocol and patcher logic were tested locally. RTX 3050/Vulkan audio has not been verified here.
 
-## Использование
+## Меню / Menu
+
+| Пункт | Русский | English |
+|---|---|---|
+| 1 | Проверить текущее состояние | Check current status |
+| 2 | Применить / обновить патч | Apply / update patch |
+| 3 | Переключить на CPU | Switch to CPU |
+| 4 | Переключить на GPU (Vulkan) | Switch to GPU (Vulkan) |
+| 5 | Включить Q4 | Use Q4 |
+| 6 | Включить Q8 | Use Q8 |
+| 7 | Запустить игру + логи | Launch game + logs |
+| 8 | Русский / English | Русский / English |
+| 0 | Выход | Exit |
+
+Язык выбирается по языку Windows, меняется пунктом 8 и сохраняется в `language.txt`. Можно явно запустить `SwyfPatch.bat --lang ru` или `--lang en`. Технические журналы сохраняются на английском.
+
+The UI follows the Windows language on first launch. Option 8 switches and remembers the language in `language.txt`; `--lang ru` / `--lang en` overrides it for the session. Diagnostic logs remain in English.
+
+Пункт 2 сохраняет выбранные модель и бэкенд. CPU/GPU не переключают модель, а Q4/Q8 сохраняют бэкенд. При применении используется штатный 10-секундный образец голоса для сборок 24/22 октября. Пункт 1 только читает файлы, пункт 7 только запускает игру и собирает логи. В главном меню Enter ничего не устанавливает.
+
+Apply preserves the selected model/backend. CPU/GPU switches preserve the model; Q4/Q8 switches preserve the backend. Patching uses the original 10-second voice reference for the supported 24/22 October DLL tables. Check is read-only; launch does not install a patch.
+
+## Изменение для Q4 / Q4 change
+
+Q4 больше не спрятана и не заменяется Q8. Её исходные GGUF-веса остаются **без изменений**, с тем же SHA-256. Новый `QwenTtsWorker.exe` распознаёт проверенную Q4 и **только при Vulkan0** включает совместимый вычислительный режим:
+
+- отключает FP16-вычисления, специализированный quantized mat-vec и cooperative-matrix пути;
+- отключает оптимизацию графа, слияние операций и flash attention;
+- передаёт выбор бэкенда и переключатели непосредственно в нативное окружение CRT, которое читает GGML.
+
+Выбранный бэкенд остаётся **Vulkan0**, автоматической подмены на CPU нет. При отсутствии выбранного GPU возвращается явная ошибка. Вычисления могут стать медленнее. Q8 и CPU сохраняют исходные параметры синтеза; формат запросов, лимиты, поток аудио и обработка голосового образца совместимы с исходным воркером.
+
+Q4 weights stay byte-for-byte unchanged. For the verified Q4 + Vulkan0 combination, the replacement worker disables the older runtime's FP16, specialized quantized mat-vec, cooperative-matrix, graph optimization/fusion and flash-attention paths. It writes environment options to both .NET/Win32 and the native CRT. GPU selection stays Vulkan0, with no silent CPU fallback. This trades speed for a more conservative GPU path; Q8 and CPU retain their synthesis defaults.
+
+В исходных пользовательских тестах Q8 работала нормально, Q4 на Vulkan давала рычание; Q4 на CPU пользователем ещё не проверялась. Локальный контрольный синтез исходной Q4 на CPU воспроизвёл полную фразу, которую распознаватель восстановил почти дословно. Точный дефект NVIDIA/Vulkan пока не локализован; новый режим и нативные логи позволяют проверить этот участок отдельно.
+
+## Логи / Logs
+
+После пункта 7 ZIP содержит:
+
+- `Player.log` — лог текущего запуска игры;
+- `qwen-worker/qwen-*.log` — версия воркера, хеш модели, выбранный режим, нативные сообщения Qwen/GGML, устройство, начало и завершение запросов, ошибки и статистика аудио;
+- `qwen-worker/audio-*.wav` — озвучка **первых шести реплик**, максимум 30 секунд каждая. Это выход синтезатора, не запись микрофона. WAV обновляется по мере генерации и остаётся доступным после досрочного выхода;
+- `system-and-dll.txt` — DLL, модели, runtime и оборудование; известная локальная замена воркера отмечается отдельно от оригинального манифеста;
+- `speech-summary.txt` — текущие события речи и воркера. Старые `before-/after-/prev` логи не смешиваются с текущими;
+- журнал патчера и код завершения игры.
+
+Ничего не отправляется автоматически. В журнале воркера сохраняется текст синтезируемых реплик. При обычном запуске игры через Steam записывается только журнал в `%USERPROFILE%\AppData\LocalLow\Jatater Worldwide\Scam With Your Friends\swyf-qwen-logs`, без WAV. Журнал ограничен 8 МБ на процесс. Часть прямых сообщений native stderr может отсутствовать: перехватываются callback-журналы Qwen/GGML, а не весь stderr.
+
+Option 7 saves the current Unity log, native Qwen/GGML logs and WAV audio of the first six generated replies (up to 30 seconds each). It records synthesized output, not microphone audio. Nothing is uploaded automatically. Ordinary game launches write only worker logs under the game's LocalLow profile; audio capture is enabled only for patcher test launches.
+
+## Совместимость и откат / Compatibility and restore
+
+Патчер проверяет точные хеши DLL и нативного runtime. Неизвестные версии не перезаписываются. В архив включён только новый управляемый воркер и его исходники; DLL игры, нативные библиотеки и модели не распространяются. Оригинальный воркер сохраняется рядом как `QwenTtsWorker.exe.swyf.original`; оригинальная игровая DLL — в проверенной резервной копии.
+
+Таблицы патчей игровой DLL 24/22 октября сохранены: исправление `VerifyAsync`, таймауты, выбор CPU/Vulkan и 3/10 секунд. Установка нового воркера требует точного runtime из предоставленной игры; это дополнительная проверка к хешу игровой DLL. Старые DLL-таблицы сами по себе не означают совместимость другого runtime.
+
+`--restore` восстанавливает **игровую DLL и исходный Qwen-воркер**. Модель и настройки голоса не откатываются. При необходимости Q8 выбирается отдельно.
+
+Exact file hashes gate installation. Unknown game/native versions are preserved. The original worker and game DLL are backed up. `--restore` restores both executables, leaving models and voice preferences unchanged.
 
 ```bat
-SwyfPatch.bat                          :: интерактивное меню (двойной клик)
-SwyfPatch.bat --backend cpu            :: без меню: патч с принудительным CPU-бэкендом
-SwyfPatch.bat --backend vulkan         :: без меню: принудительный Vulkan0
-SwyfPatch.bat --model q4               :: без меню: облегчённая модель Q4_K_M (~2x быстрее)
-SwyfPatch.bat --model q8               :: без меню: стандартная Q8_0
-SwyfPatch.bat --check                  :: проверить совместимость и состояние, ничего не меняя
-SwyfPatch.bat --restore                :: откат к оригинальной DLL
-SwyfPatch.bat --backend cpu --check "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --lang en "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --check "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --backend vulkan --model q4 "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --backend cpu --model q4 "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --model q8 "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --launch "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --logs "D:\Games\Scam With Your Friends"
+SwyfPatch.bat --restore "D:\Games\Scam With Your Friends"
 ```
 
-Любой флаг превращает запуск в прямое действие без меню (удобно для скриптов). Папку игры можно перетащить на `SwyfPatch.bat`. Повторные запуски безопасны: патчер видит, что DLL уже пропатчена. Игра ищется через `libraryfolders.vdf` Steam и по стандартным путям на всех дисках. Если игра запущена — в меню патчер предложит закрыть её автоматически.
+Модели закреплены на ревизии [`b7ee2e8…`](https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/tree/b7ee2e8c7459c3bea99da23e3d178125a7d1713c). Все загрузки и переключения проверяются по SHA-256. Если кэша моделей ещё нет, сначала дайте игре скачать штатные модели.
 
-## Поддерживаемые сборки игры
+## Проверка / Validation
 
-Совместимость определяется по точным SHA-256 `Assembly-CSharp.dll` (плюс проверяются `ScriptsAssDef.dll` и `Kolkata.Speech.dll`), а не по номеру версии. Основная цель — **игра версии 0.1.84** (обновление Steam от 24.10.2026, buildid 26176038): полный функционал. Также поддерживаются **0.1.83** (сборка 22.10.2026) и сборка 19.10.2026. Пропатченные DLL старого формата (до v2.7) распознаются и автоматически обновляются при следующем запуске.
+Пройдены 284 автоматические проверки в PowerShell 7.4.6 на временных файлах с дополнительными фикстурами DLL 22 октября и предыдущего воркера: совместимость DLL, миграции, бэкапы и откат воркера, несовместимый runtime, модели, плоское меню RU/EN и логи. Windows API в этих тестах подменены. Дополнительно новый скомпилированный воркер прошёл реальный бинарный протокол и синтез Q4/Q8 через локально собранную CPU-версию того же Qwen runtime. Подробности: [docs/VALIDATION.md](docs/VALIDATION.md).
 
-<details>
-<summary>Контрольные суммы SHA-256</summary>
+```powershell
+pwsh -NoProfile -File tests/Test-SwyfPatch.ps1 -GameRoot "D:\Games\Scam With Your Friends"
+```
 
-| Файл | Версия игры | Состояние | SHA-256 |
-|---|---|---|---|
-| Assembly-CSharp.dll | **0.1.84** (24.10) | оригинал | `978fd1b5c50f28b523ba49145a9f716a3c2c9cb3ded20bbb175976116ad2020e` |
-| Assembly-CSharp.dll | **0.1.84** | патч auto | `2834a771e05b3cd7a7104d37267e8a106c09d28c8ba3a84733396e145d9a6582` |
-| Assembly-CSharp.dll | **0.1.84** | патч cpu | `60404f5a5912533a26a3bb43b69c8fc0601c23fd1cf7ff5ada01550b2733db85` |
-| Assembly-CSharp.dll | **0.1.84** | патч vulkan | `b25fc6a03702c043dcd54de20edead809e3c4d74a6d27090230e2e5834a510cb` |
-| ScriptsAssDef.dll | 0.1.84 | оригинал | `07e6bf770800ee75ddc3c5953232fe2cbbb2e85dd9933c0231092e0f3db43403` |
-| Kolkata.Speech.dll | 0.1.84 | оригинал | `737e28564e6be0f5d5ce28d679af78b2d616fbf5591225e5e83ea0a26945d66d` |
-| Assembly-CSharp.dll | 0.1.83 (22.10) | оригинал | `f94b92369d2ac0f7c1f10a30ae6a1c7fc4cee99c538693c162b1a7fdc02a2bb2` |
-| Assembly-CSharp.dll | 0.1.83 | патч auto (v2.7+) | `c162a0aada0d1e7799d3669eae0bf5d40098724a13baf964dd2e11c9807b5497` |
-| Assembly-CSharp.dll | 0.1.83 | патч cpu (v2.7+) | `dc3868a57f0d6903e1fadb2ff9e43b72ebb382567d2b6a3c3af1d3182d076cd5` |
-| Assembly-CSharp.dll | 0.1.83 | патч vulkan (v2.7+) | `6a4f244651d9fd4774535bb5419e1b3bb6b600dfde3427f4d5aefb10fe2d51c0` |
-| ScriptsAssDef.dll | 0.1.83 | оригинал | `5432d089e0e9c93b1a74addaf27ec240758fc2a183ec913ca41d9949c46e0a84` |
-| Kolkata.Speech.dll | 0.1.83 | оригинал | `7f5a3ec065e87d85705f14b36e490e7bf2b0a1c95300813e7d9d197836becf6b` |
-| Assembly-CSharp.dll | 19.10 | оригинал | `1848ce450ab489b14539a2b2b0c995599965dde03a61479a15772ddf17c24025` |
-| Assembly-CSharp.dll | 19.10 | патч auto | `a09ab9c67b229007199d6202e8de11ce1e0b0a4f4785e66317a8fac4fb98fb7a` |
-| ScriptsAssDef.dll | 19.10 | оригинал | `0125ea190318ed20b09041eef0303ba3a73355d6073dab131c2234bcd471fefc` |
+Сборка воркера — только для разработки: [worker/Build-Worker.ps1](worker/Build-Worker.ps1). Использует Roslyn из PowerShell 7 и reference assemblies .NET Framework 4.7.2. Для обычного использования `payload/QwenTtsWorker.exe` уже собран.
 
-</details>
+## Авторы / Credits
 
-## Как это работает
-
-<details>
-<summary>Технические подробности</summary>
-
-Патчер вносит **171 байт правок в 7 проверенных диапазонах** и меняет только `Assembly-CSharp.dll` (метаданные, имена типов и расположение таблиц не трогаются):
-
-| Что | Было | Стало |
-|---|---|---|
-| `Kolkata.QwenTts.QwenWorkerClient::HardwareEligible` | VRAM ≥ 5632 МБ + белый список вендоров/девайсов + RAM/ядра | всегда `true`; выбор бэкенда по VRAM ≥ 1024 МБ или принудительно |
-| Отмена запроса озвучки (`QwenTtsSingleton::Prompt`) | 30 с | 300 с |
-| Дедлайн первого звука (`Prompt`) | 20 с | 300 с |
-| Таймаут подготовки (`<Prepare>d__39::MoveNext`, CTS) | 20 с | 120 с |
-| Дедлайн подготовки (там же, `expires`) | 20 с | 120 с |
-| Таймаут фрагмента (`<Prompt>b__2`, `CancelAfter`) | 30 с | 120 с |
-| Образец голоса (`<Prompt>b__0`, `LoadWavChannels`) | 10 с | 3 с |
-
-Перед каждой записью: сверка исходных байтов по всем смещениям → применение правок в памяти → сверка SHA-256 результата → атомарная замена через временный файл. IL заменённого метода сохраняет размер тела (141 байт), лимит стека (2) и допустимость (проверено дизассемблированием всех вариантов).
-
-</details>
-
-## Бэкенды и производительность
-
-Воркер игры умеет два бэкенда: **Vulkan** (`ggml-vulkan.dll`) и **CPU** (`ggml-cpu-alderlake.dll`, AVX2). Что быстрее на конкретном железе — заранее неизвестно (на слабых iGPU Vulkan бывает медленнее CPU):
-
-1. `SwyfPatch.bat --backend vulkan` → одна и та же фраза, замерить время до первого звука.
-2. `SwyfPatch.bat --backend cpu` → та же фраза → сравнить.
-3. Оставить победителя. Восстановление оригинала (`--restore`) работает независимо от выбранного бэкенда.
-
-Советы: обновите драйвер iGPU (для Arc драйверы заметно влияют на Vulkan-вычисления), играйте от розетки в режиме максимальной производительности, закройте браузер на время генерации.
-
-## Резервная копия и откат
-
-- Бэкап: `Assembly-CSharp.dll.swyf.original` рядом с DLL (переиспользуются валидные `.swyf-v23.original` / `.swyf-v22.original`).
-- Откат: `SwyfPatch.bat --restore` либо «проверить целостность файлов» в Steam.
-- Если игра обновилась и патчер пишет `Unsupported Assembly-CSharp.dll (SHA-256 ...)` — сделайте откат через Steam и дождитесь обновления патчера.
-
-## Решение проблем
-
-| Симптом | Что делать |
-|---|---|
-| `Unsupported ... (SHA-256 ...)` | Игра обновилась — проверьте целостность файлов в Steam, патчер требует адаптации |
-| `Several game folders found` | Перетащите нужную папку игры на `SwyfPatch.bat` |
-| `Qwen model download stalled` | Игра качает модели сама и умеет докачивать с места обрыва; просто перезапустите игру |
-| Озвучка не поменялась на Qwen3 | В настройках игры выберите Qwen3/русский провайдер; статус железа — `QwenTtsProgress`, логи — `Player.log` в `%USERPROFILE%\AppData\LocalLow\Jatater Worldwide\Scam With Your Friends\` |
-
-## Авторы
-
-- **[psihozniy](https://github.com/psihozniy)** — автор оригинального фикса (снятие аппаратного ограничения и таймаутов Qwen3, ветка v2.1). Этот проект — развитие его идеи.
-- **markkentos** — адаптация под новые сборки, универсальный PowerShell-патчер, переключатель бэкендов и моделей.
-- Отдельная благодарность авторам форка **SwyfPatcher-2.6.0** — идеи переключения моделей Q4_K_M/Q8_0, поиска Steam-библиотек через `libraryfolders.vdf` и обхода проверки моделей взяты оттуда.
-
-Спасибо разработчикам игры за локальную нейроозвучку и Alibaba за открытую Qwen3-TTS.
-
-## Лицензия
-
-[MIT](LICENSE). Названия игры и модели Qwen3 принадлежат их правообладателям.
+Оригинальный аппаратный/таймаутный фикс — **psihozniy**, исходный PowerShell-патчер — **markkentos**; идеи переключения моделей использованы из SwyfPatcher-2.6.0. C# bindings — **lookbe**, см. [worker/THIRD_PARTY_NOTICES.md](worker/THIRD_PARTY_NOTICES.md). Локальная доработка, не официальный релиз игры или авторов. [MIT](LICENSE).

@@ -1,8 +1,7 @@
 @echo off
 setlocal
-title SwyfPatcher v2.8 - Qwen3 patch for Scam With Your Friends
-echo SwyfPatcher v2.8 (universal, no .NET SDK required). Close the game first.
-echo Double-click: interactive menu. Flags: --backend auto^|cpu^|vulkan --model q4^|q8 [--check ^| --restore]
+title SwyfPatcher 2.9.0 - Qwen3 patch and diagnostics
+echo SwyfPatcher 2.9.0
 set "SCRIPT=%~dp0src\SwyfPatch.ps1"
 if not exist "%SCRIPT%" (
     echo [FAIL] src\SwyfPatch.ps1 not found next to this launcher. Keep the repository layout intact.
@@ -12,6 +11,6 @@ if not exist "%SCRIPT%" (
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
 set "RC=%errorlevel%"
 echo.
-if "%RC%"=="0" (echo Completed successfully.) else if "%RC%"=="2" (echo Done with warnings: read the output above.) else (echo FAILED: read the output above.)
+echo SwyfPatcher [RC=%RC%]
 pause
 exit /b %RC%

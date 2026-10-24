@@ -1,0 +1,122 @@
+﻿# Verified binary edits. No game code is executed when loading this table.
+# Patched HardwareEligible bodies (141 bytes each; ldstr tokens differ per build, shape identical):
+#   auto:   VRAM>=1024 -> out="Vulkan0" else out="CPU"; always return true
+#   cpu:    out="CPU" unconditionally; return true
+#   vulkan: out="Vulkan0" unconditionally; return true
+$AfterA   = '0E052000040000320A0E087296E30370512B080E08728EE3037051' + ('00' * 112) + '172A'
+$CpuA     = '0E08728EE3037051' + ('00' * 131) + '172A'
+$VulkanA  = '0E087296E3037051' + ('00' * 131) + '172A'
+$AfterB   = '0E052000040000320A0E087294C40770512B080E08728CC4077051' + ('00' * 112) + '172A'
+$ModelVerifyA = ('170BDDAC000000' + ('00' * 22))
+
+# Build 2026-10-22 has different user-string tokens; never reuse 24/19 tokens.
+$AfterC = '0E052000040000320A0E087269DA0770512B080E087261DA077051' + ('00' * 112) + '172A'
+$CpuC = '0E087261DA077051' + ('00' * 131) + '172A'
+$VulkanC = '0E087269DA077051' + ('00' * 131) + '172A'
+
+$Builds = @(
+    @{
+        Tag      = '2026-10-24'
+        Original = '978FD1B5C50F28B523BA49145A9F716A3C2C9CB3DED20BBB175976116AD2020E'
+        Patched  = @{
+            auto = 'EB8218E18FEB96B7079B78E2D9B873EEFB04572883EA68A126A7C2634BF66CA5'
+            cpu = 'BB1D9F16022DA1E26F971ADC765388AA932CF7B0D8A37539F6573B77FF8B1BF2'
+            vulkan = '4601906F62B3C282B253D92EFA4F66B60EFB2BCE8B836E1355866893661A1320'
+        }
+        Patched3 = @{
+            auto = '8C257744BCC270537AF55BFE17CEE3F2B463FC7F2A11A40E1E245EB478A011EC'
+            cpu = '70F49977A3919ADD38A63BFEB71F8159B42DF4A5A052F8D5B3EA134BD448B749'
+            vulkan = '6C234373AD5CD1DCCBB9C4643178615984470B696C3760C5D0A0E06E62847FF9'
+        }
+        DefaultReference = 10
+        Scripts  = '07E6BF770800EE75DDC3C5953232FE2CBBB2E85DD9933C0231092E0F3DB43403'
+        Speech   = '737E28564E6BE0F5D5CE28D679AF78B2D616FBF5591225E5E83EA0A26945D66D'
+        HwOffset = 0x8BEAC
+        HwBefore = '0E05200016000032500E0620DE1000002E090E062002100000333E0E062002100000331B0E07209F6900002E2C0E0720DF6700002E230E07204C7400002E1A0E0620DE100000330E0E0720852B0000FE0116FE012B04172B01160A0E08062D07728EE303702B057296E303705102065F2C190320983A000032110420001800006A3208051AFE0416FE012A162A'
+        Blocks   = @{ auto = $AfterA; cpu = $CpuA; vulkan = $VulkanA }
+        Edits    = @(
+            @{ o = 0x8B29C; b = '0000000000003E40'; a = '0000000000C07240'; d = 'Prompt cancellation: 30 -> 300 seconds' },
+            @{ o = 0x8B303; b = '0000000000003440'; a = '0000000000C07240'; d = 'First audio deadline: 20 -> 300 seconds' },
+            @{ o = 0x8BA06; b = '0A'; a = '0A'; Reference = $true; d = 'Voice reference: original 10 seconds' },
+            @{ o = 0x8BC58; b = '0000000000003E40'; a = '0000000000005E40'; d = 'Chunk timeout: 30 -> 120 seconds' },
+            @{ o = 0x8BD54; b = '0000000000003440'; a = '0000000000005E40'; d = 'Prepare timeout: 20 -> 120 seconds' },
+            @{ o = 0x8BDE3; b = '0000000000003440'; a = '0000000000005E40'; d = 'Prepare deadline: 20 -> 120 seconds' },
+            @{ o = 0x8AF8C; b = '087B9C13000473C302000A28C402000A087B9E1300047BC51300042E07'; a = $ModelVerifyA; d = 'Model verification: allow custom quantizations (Q4_K_M)' }
+        )
+    },
+    @{
+        Tag      = '2026-10-22'
+        Original = 'F94B92369D2AC0F7C1F10A30AE6A1C7FC4CEE99C538693C162B1A7FDC02A2BB2'
+        Patched  = @{
+            auto = '47A8D021FB62141334D0AFB77C43EFD77448C00ABFE335016EBCC59FA8A06779'
+            cpu = '10A098B9B3A0DA5596DF737D8DFE4D93526FB7BBB8ABB44DAFEFB21C0057973D'
+            vulkan = '3C141BAD617CBE6601FBD9530F762E4D33CF7F7823752D3CB0B79C4CEF0C7EFD'
+        }
+        Patched3 = @{
+            auto = 'D2FBC887FFE5983B42522A2356D86E0F985D97CE27CFCD25BEDEC566C2CF9478'
+            cpu = 'AEA9D470251D7C26EB9377CE0897FDACCCD0B4D81005180A1EC47A3FFF9FAAF2'
+            vulkan = 'CE7A667F0CACB0D239DBB773E6E9DD55437E4EEF31DC541C458E3AFD09C527BE'
+        }
+        DefaultReference = 10
+        Scripts  = '5432D089E0E9C93B1A74ADDAF27EC240758FC2A183EC913CA41D9949C46E0A84'
+        Speech   = '7F5A3EC065E87D85705F14B36E490E7BF2B0A1C95300813E7D9D197836BECF6B'
+        HwOffset = 0x1222CC
+        HwBefore = '0E05200016000032500E0620DE1000002E090E062002100000333E0E062002100000331B0E07209F6900002E2C0E0720DF6700002E230E07204C7400002E1A0E0620DE100000330E0E0720852B0000FE0116FE012B04172B01160A0E08062D077261DA07702B057269DA07705102065F2C190320983A000032110420001800006A3208051AFE0416FE012A162A'
+        Blocks   = @{ auto = $AfterC; cpu = $CpuC; vulkan = $VulkanC }
+        Edits    = @(
+            @{ o = 0x1216BC; b = '0000000000003E40'; a = '0000000000C07240'; d = 'Prompt cancellation: 30 -> 300 seconds' },
+            @{ o = 0x121723; b = '0000000000003440'; a = '0000000000C07240'; d = 'First audio deadline: 20 -> 300 seconds' },
+            @{ o = 0x121E26; b = '0A'; a = '0A'; Reference = $true; d = 'Voice reference: original 10 seconds' },
+            @{ o = 0x122078; b = '0000000000003E40'; a = '0000000000005E40'; d = 'Chunk timeout: 30 -> 120 seconds' },
+            @{ o = 0x122174; b = '0000000000003440'; a = '0000000000005E40'; d = 'Prepare timeout: 20 -> 120 seconds' },
+            @{ o = 0x122203; b = '0000000000003440'; a = '0000000000005E40'; d = 'Prepare deadline: 20 -> 120 seconds' },
+            @{ o = 0x1213AC; b = '087B9A27000473C302000A28C402000A087B9C2700047BC32700042E07'; a = $ModelVerifyA; d = 'Model verification: allow custom quantizations (Q4_K_M)' }
+        )
+    },
+    @{
+        Tag      = '2026-10-19'
+        DefaultReference = 3
+        Original = '1848CE450AB489B14539A2B2B0C995599965DDE03A61479A15772DDF17C24025'
+        Patched  = @{ auto = 'A09AB9C67B229007199D6202E8DE11CE1E0B0A4F4785E66317A8FAC4FB98FB7A' }
+        Scripts  = '0125EA190318ED20B09041EEF0303BA3A73355D6073DAB131C2234BCD471FEFC'
+        Speech   = $null
+        HwOffset = 0x11E638
+        HwBefore = '0E0520001E000032500E0620DE1000002E090E062002100000333E0E062002100000331B0E07209F6900002E2C0E0720DF6700002E230E07204C7400002E1A0E0620DE100000330E0E0720852B0000FE0116FE012B04172B01160A0E08062D07728CC407702B057294C407705102065F2C190320983A000032110420001800006A3208051AFE0416FE012A162A'
+        Blocks   = @{ auto = $AfterB }
+        Edits    = @(
+            @{ o = 0x11DA28; b = '0000000000003E40'; a = '0000000000C07240'; d = 'Prompt cancellation: 30 -> 300 seconds' },
+            @{ o = 0x11DA8F; b = '0000000000003440'; a = '0000000000C07240'; d = 'First audio deadline: 20 -> 300 seconds' },
+            @{ o = 0x11E4E0; b = '0000000000003440'; a = '0000000000005E40'; d = 'Prepare timeout: 20 -> 120 seconds' },
+            @{ o = 0x11E56F; b = '0000000000003440'; a = '0000000000005E40'; d = 'Prepare timeout: 20 -> 120 seconds' },
+            @{ o = 0x11E3E4; b = '0000000000003E40'; a = '0000000000005E40'; d = 'Chunk timeout: 30 -> 120 seconds' },
+            @{ o = 0x11E192; b = '0A'; a = '03'; d = 'Voice reference: 10 -> 3 seconds' }
+        )
+    }
+)
+
+# sanity: patch tables must be complete (141 bytes = 282 hex chars)
+foreach ($b in $Builds) {
+    if ($b.HwBefore.Length -ne 282) { throw "Internal error: HwBefore length for $($b.Tag) is $($b.HwBefore.Length), expected 282." }
+    foreach ($k in $b.Blocks.Keys) {
+        if ($b.Blocks[$k].Length -ne 282) { throw "Internal error: Block '$k' length for $($b.Tag) is $($b.Blocks[$k].Length), expected 282." }
+    }
+}
+
+# Recognized older outputs: v2.8 (including invalid IL) and pre-2.7.
+# Reconstruct and hash the exact original before producing any new variant.
+$LegacyPatched = @{
+    '978FD1B5C50F28B523BA49145A9F716A3C2C9CB3DED20BBB175976116AD2020E' = @{
+        '2834A771E05B3CD7A7104D37267E8A106C09D28C8BA3A84733396E145D9A6582' = 'auto'
+        '60404F5A5912533A26A3BB43B69C8FC0601C23FD1CF7FF5ADA01550B2733DB85' = 'cpu'
+        'B25FC6A03702C043DCD54DE20EDEAD809E3C4D74A6D27090230E2E5834A510CB' = 'vulkan'
+    }
+    'F94B92369D2AC0F7C1F10A30AE6A1C7FC4CEE99C538693C162B1A7FDC02A2BB2' = @{
+        'C162A0AADA0D1E7799D3669EAE0BF5D40098724A13BAF964DD2E11C9807B5497' = 'auto'
+        'DC3868A57F0D6903E1FADB2FF9E43B72EBB382567D2B6A3C3AF1D3182D076CD5' = 'cpu'
+        '6A4F244651D9FD4774535BB5419E1B3BB6B600DFDE3427F4D5AEFB10FE2D51C0' = 'vulkan'
+        '7FB0CD47103813A740E5CF5755055DFC11AF3E2F3A8F4F0F14296121C90C27B3' = 'auto'
+        '39D7DFE1D3A9E9E1376AAC1C3090393ED5B841F4CBC4D1C4E8006436F8A6893A' = 'cpu'
+        '7308A9DC6EE1983A622C77270D0817A91AE4CCD53F9649E145B539D74CD47290' = 'vulkan'
+    }
+}
+

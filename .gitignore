@@ -11,3 +11,13 @@ Thumbs.db
 # Local analysis dumps
 *.log
 *.report.txt
+
+# Local test packages and collected diagnostics
+outputs/
+logs/
+__pycache__/
+
+# Local user preferences and PowerShell profiling
+language.txt
+StartupProfileData*
+*.swyf.original

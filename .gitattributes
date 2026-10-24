@@ -1,0 +1,6 @@
+* text=auto
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cs text eol=lf
+*.md text eol=lf
+*.exe binary
