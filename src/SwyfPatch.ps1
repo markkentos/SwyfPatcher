@@ -3,7 +3,7 @@
 # Local 2.9 repair: valid VerifyAsync branch, original voice reference, safe menu and logs.
 # Dot-sourcing loads functions for tests; only direct execution enters the UI.
 $ErrorActionPreference = 'Stop'
-$Version = '2.9.0'
+$Version = '2.9.2'
 $GameName = 'Scam With Your Friends'
 $PatcherRoot = Split-Path -Parent $PSScriptRoot
 $SessionLog = $null
@@ -228,14 +228,14 @@ function Invoke-Patch($ctx, [string]$backend, [int]$reference = 0, [string]$mode
         if ($ctx.CurHash -ne $plan.Hash -and (Get-FileHash -LiteralPath $ctx.Dll).Hash -eq $plan.Hash) {
             ReplaceVerified $ctx.Dll $plan.Output $ctx.Current $ctx.CurHash
         }
-        if ($runtimePlan.CurHash -ne $runtimePlan.Hash -and (Get-FileHash -LiteralPath $runtimePlan.Path).Hash -eq $runtimePlan.Hash) {
-            ReplaceVerified $runtimePlan.Path $runtimePlan.Output $runtimePlan.Current $runtimePlan.CurHash
-        }
+        Undo-RuntimePlan $runtimePlan
         throw $failure
     }
     try { Set-VoicePreference } catch { Write-Warn2 ((T 'Выберите Qwen в настройках игры; ошибка реестра: ' 'Select Qwen in game settings; registry update failed: ') + $_.Exception.Message) }
     Write-Ok (T "Готово. Обработка: $($plan.Backend), образец: $($plan.Reference) с; SHA256=$($plan.Hash)" "Patched. Backend=$($plan.Backend), reference=$($plan.Reference)s; SHA256=$($plan.Hash)")
     Write-Host (T "Резервная копия: $backup" "Original backup: $backup")
+    try { Install-LogShortcut $ctx.Game } catch { Write-Warn2 ((T 'Ярлык логов не создан: ' 'Log shortcut was not created: ') + $_.Exception.Message) }
+    Write-Host (T 'Логи и первые 6 реплик Qwen сохраняются автоматически. Запускайте игру как обычно; после игры пункт 7 соберёт ZIP.' 'Logs and the first 6 Qwen replies are saved automatically. Launch the game normally; use option 7 afterwards to collect a ZIP.')
 }
 function Invoke-Check($ctx, [string]$backend, [int]$reference = 0, [string]$model = '') {
     $plan = Get-PatchPlan $ctx $backend $reference
@@ -254,8 +254,9 @@ function Invoke-Restore($ctx) {
     if (-not $ctx.Already) { Set-RuntimePlan $runtimePlan; Write-Ok (T 'DLL уже оригинальная.' 'DLL is already original.'); return }
     $plan = Get-PatchPlan $ctx $ctx.CurVariant $ctx.Build.DefaultReference
     $backup = Save-OriginalBackup $ctx $plan.Source
-    ReplaceVerified $ctx.Dll $ctx.Current $plan.Source $ctx.Build.Original
     Set-RuntimePlan $runtimePlan
+    try { ReplaceVerified $ctx.Dll $ctx.Current $plan.Source $ctx.Build.Original }
+    catch { $failure = $_; Undo-RuntimePlan $runtimePlan; throw $failure }
     Write-Ok (T "Оригинальная DLL восстановлена. Проверенная копия: $backup" "Original DLL restored. Verified backup: $backup")
     Write-Host (T 'Модели и настройки голоса не изменены.' 'Models and voice preferences are unchanged.')
 }
@@ -282,7 +283,7 @@ function Invoke-MenuAction([string]$game, [string]$choice) {
         '4' { Invoke-Action $game 'patch' 'vulkan' }
         '5' { Invoke-Action $game 'patch' '' 0 'q4' }
         '6' { Invoke-Action $game 'patch' '' 0 'q8' }
-        '7' { Invoke-Action $game 'launch' }
+        '7' { Invoke-Action $game 'logs' }
         '8' { Switch-Language }
         default { throw (T 'Выберите пункт из меню. Изменений нет.' 'Choose a listed action. No changes made.') }
     }

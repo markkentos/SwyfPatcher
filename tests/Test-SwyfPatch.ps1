@@ -33,8 +33,20 @@ try {
     $runtimeSource = Get-RuntimeDir $GameRoot
     $runtime = Get-RuntimeDir $game
     New-Item -ItemType Directory -Path (Join-Path $runtime 'gpu') -Force | Out-Null
-    foreach ($name in @('QwenTtsWorker.exe') + @($RuntimeSpec.Dependencies.Keys)) {
-        Copy-Item -LiteralPath (Join-Path $runtimeSource $name) -Destination (Join-Path $runtime $name)
+    $sourceManifest = Get-Content -LiteralPath (Join-Path $runtimeSource 'runtime-manifest.json') -Raw | ConvertFrom-Json
+    foreach ($name in @('runtime-manifest.json') + @($sourceManifest.files | ForEach-Object { $_.path })) {
+        $destination = Join-Path $runtime $name
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $runtimeSource $name) -Destination $destination
+    }
+    $manifestPath = Join-Path $runtime 'runtime-manifest.json'
+    $originalManifestBytes = [IO.File]::ReadAllBytes($manifestPath)
+    $liveManifestBefore = (Get-FileHash -LiteralPath (Join-Path $runtimeSource 'runtime-manifest.json')).Hash
+    function Assert-AllRuntimeChecksums([string]$label) {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        foreach ($entry in $manifest.files) {
+            Assert ((Get-FileHash -LiteralPath (Join-Path $runtime $entry.path)).Hash -eq $entry.sha256) "$label game manifest check: $($entry.path)"
+        }
     }
     $workerPath = Join-Path $runtime 'QwenTtsWorker.exe'
     $liveWorkerBefore = (Get-FileHash -LiteralPath (Join-Path $runtimeSource 'QwenTtsWorker.exe')).Hash
@@ -84,6 +96,8 @@ try {
     $stale = Join-Path $managed 'Assembly-CSharp.dll.swyf.original'
     [IO.File]::WriteAllText($stale, 'STALE BACKUP - PRESERVE')
     Invoke-Patch (Get-Context $game) 'cpu' 10
+    Assert-AllRuntimeChecksums 'After installation'
+    Assert ((Get-FileHash -LiteralPath ($manifestPath + '.swyf.original')).Hash -eq $RuntimeSpec.OriginalManifest) 'Original manifest backup verified'
     Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.PatchedWorker) 'Runtime worker installed with verified hash'
     Assert ((Get-FileHash -LiteralPath ($workerPath + '.swyf.original')).Hash -eq $RuntimeSpec.OriginalWorker) 'Original worker backup preserved'
     Assert ((Get-Context $game).CurVariant -eq 'cpu') 'CPU written atomically'
@@ -95,6 +109,8 @@ try {
     Invoke-Check (Get-Context $game) 'cpu' 10 'q4'
     Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $hashBeforeCheck) 'Check with model option leaves DLL untouched'
     Invoke-Restore (Get-Context $game)
+    Assert-AllRuntimeChecksums 'After restore'
+    Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $RuntimeSpec.OriginalManifest) 'Restore recovers byte-identical original manifest'
     Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Restore also restores original worker'
     Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Original) 'Restore ignores stale backup and restores exact original'
     $bad = [byte[]]$original.Clone(); $bad[0] = 0
@@ -138,7 +154,7 @@ try {
     Invoke-MenuAction $game '6'
     Assert ($dispatches[-1].Model -eq 'q8') 'Direct Q8 choice'
     Invoke-MenuAction $game '7'
-    Assert ($dispatches[-1].Action -eq 'launch' -and $dispatches.Count -eq 7) 'Launch does not patch'
+    Assert ($dispatches[-1].Action -eq 'logs' -and $dispatches.Count -eq 7) 'Collecting logs neither launches nor patches the game'
     foreach ($choice in @('invalid', '9', '10', '')) { Assert-Throws { Invoke-MenuAction $game $choice } 'Invalid main menu choice cannot patch' }
     Assert ($dispatches.Count -eq 7) 'Invalid choices have no action'
     $realPatcherRoot = $PatcherRoot
@@ -173,6 +189,82 @@ try {
     Assert ([IO.File]::ReadAllText($workerPath) -eq 'unknown worker') 'Worker validation has no side effects'
     [IO.File]::WriteAllBytes($workerPath, $originalWorkerBytes)
 
+    # Reproduce the real Windows failure: our worker + the unchanged upstream manifest.
+    $payloadBytes = [IO.File]::ReadAllBytes((Join-Path $PatcherRoot 'payload/QwenTtsWorker.exe'))
+    [IO.File]::WriteAllBytes($workerPath, $payloadBytes)
+    [IO.File]::WriteAllBytes($manifestPath, $originalManifestBytes)
+    Assert-Throws { Assert-RuntimeManifestReady $game } 'Regression: mismatched manifest cannot silently launch MOSS'
+    $repair = Get-RuntimePlan $game
+    Assert ($repair.CurHash -eq $repair.Hash -and $repair.Manifest.CurHash -ne $repair.Manifest.Hash) 'Same worker still requires a manifest repair'
+    Set-RuntimePlan $repair
+    Assert-RuntimeManifestReady $game
+    Assert-AllRuntimeChecksums 'After repairing the reported failure'
+    $repairedManifestHash = (Get-FileHash -LiteralPath $manifestPath).Hash
+    Set-RuntimePlan (Get-RuntimePlan $game)
+    Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $repairedManifestHash) 'Repeated repair is idempotent'
+    Invoke-Restore (Get-Context $game)
+    Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $RuntimeSpec.OriginalManifest) 'Restore repairs runtime even with an original game DLL'
+
+    $foreignManifest = [Text.Encoding]::UTF8.GetBytes([Text.Encoding]::UTF8.GetString($originalManifestBytes).Replace('concrt140.dll', 'foreign.dll'))
+    [IO.File]::WriteAllBytes($manifestPath, $foreignManifest)
+    Assert-Throws { Invoke-Patch (Get-Context $game) 'cpu' 10 } 'Unrelated manifest edits rejected before applying any patch'
+    Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Unknown manifest leaves original worker unchanged'
+    Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Original) 'Unknown manifest leaves game DLL unchanged'
+    [IO.File]::WriteAllBytes($manifestPath, $originalManifestBytes)
+    $manifestBackup = $manifestPath + '.swyf.original'
+    [IO.File]::WriteAllText($manifestBackup, 'foreign backup')
+    Assert-Throws { Get-RuntimePlan $game } 'Unknown manifest backup is not overwritten'
+    Assert ([IO.File]::ReadAllText($manifestBackup) -eq 'foreign backup') 'Unknown backup preserved'
+    [IO.File]::WriteAllBytes($manifestBackup, $originalManifestBytes)
+    $repair = Get-RuntimePlan $game
+    [IO.File]::WriteAllBytes($manifestPath, $foreignManifest)
+    Assert-Throws { Set-RuntimePlan $repair } 'Concurrent manifest change detected before worker mutation'
+    Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Concurrent manifest rejection preserves worker'
+    [IO.File]::WriteAllBytes($manifestPath, $originalManifestBytes)
+
+    $auxiliaryPath = Join-Path $runtime 'concrt140.dll'
+    $auxiliaryBytes = [IO.File]::ReadAllBytes($auxiliaryPath)
+    [IO.File]::WriteAllText($auxiliaryPath, 'corrupt dependency outside the four ABI checks')
+    Assert-Throws { Get-RuntimePlan $game } 'Every manifest dependency is validated, including CRT files'
+    [IO.File]::WriteAllBytes($auxiliaryPath, $auxiliaryBytes)
+    $realReplaceVerified = ${function:ReplaceVerified}
+    try {
+        $script:failurePath = $manifestPath
+        function ReplaceVerified([string]$path, [byte[]]$current, [byte[]]$next, [string]$expectedHash) {
+            if ($path -eq $script:failurePath) { throw 'Simulated manifest/DLL write failure' }
+            & $realReplaceVerified $path $current $next $expectedHash
+        }
+        Assert-Throws { Set-RuntimePlan (Get-RuntimePlan $game) } 'Manifest write failure aborts installation'
+        Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Manifest failure rolls back the already-written worker'
+        Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $RuntimeSpec.OriginalManifest) 'Failed manifest remains original'
+        $script:failurePath = $dll
+        Assert-Throws { Invoke-Patch (Get-Context $game) 'cpu' 10 } 'Game DLL failure aborts outer transaction'
+        Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Outer failure rolls back worker'
+        Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $RuntimeSpec.OriginalManifest) 'Outer failure rolls back manifest'
+        $script:failurePath = ''
+        Invoke-Patch (Get-Context $game) 'cpu' 10
+        $installedDllHash = (Get-FileHash -LiteralPath $dll).Hash
+        $script:failurePath = $dll
+        Assert-Throws { Invoke-Restore (Get-Context $game) } 'Game DLL restore failure is reported'
+        Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.PatchedWorker) 'Failed restore keeps installed worker'
+        Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $repairedManifestHash) 'Failed restore keeps matching installed manifest'
+        Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $installedDllHash) 'Failed restore keeps installed game DLL'
+    } finally { Set-Item -Path Function:ReplaceVerified -Value $realReplaceVerified }
+    Invoke-Restore (Get-Context $game)
+    try {
+        function ReplaceVerified([string]$path, [byte[]]$current, [byte[]]$next, [string]$expectedHash) {
+            if ($path -eq $manifestPath) { [IO.File]::WriteAllBytes($manifestPath, $foreignManifest) }
+            & $realReplaceVerified $path $current $next $expectedHash
+        }
+        Assert-Throws { Set-RuntimePlan (Get-RuntimePlan $game) } 'Concurrent manifest write during installation aborts transaction'
+        Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq (Sha256Hex $foreignManifest)) 'Rollback preserves concurrent foreign manifest'
+        Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Concurrent manifest failure restores our worker mutation'
+    } finally {
+        Set-Item -Path Function:ReplaceVerified -Value $realReplaceVerified
+        [IO.File]::WriteAllBytes($manifestPath, $originalManifestBytes)
+    }
+    Write-Host 'PASS: manifest regression, exact runtime verification, repair, rollback and concurrency.' 
+
     # Optional real fixture from the previously distributed local package.
     if ($PreviousWorker) {
         $previousBytes = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $PreviousWorker).Path)
@@ -183,7 +275,12 @@ try {
         [IO.File]::WriteAllBytes($workerPath, $previousBytes)
         $runtimePlan = Get-RuntimePlan $game
         Assert ($runtimePlan.CurHash -eq $previousHash -and $runtimePlan.Hash -eq $RuntimeSpec.PatchedWorker) 'Previous worker plans upgrade to this release'
+        # A fully installed prior release has its own matching manifest (2.9.1).
+        $previousManifest = Get-RuntimeManifestPlan $runtime $previousHash
+        [IO.File]::WriteAllBytes($manifestPath, $previousManifest.Output)
+        $runtimePlan = Get-RuntimePlan $game
         Set-RuntimePlan $runtimePlan
+        Assert-AllRuntimeChecksums 'Previous release upgrade'
         Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.PatchedWorker) 'Previous worker upgrade installs current payload'
         Assert ((Get-FileHash -LiteralPath $backupPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Previous worker upgrade preserves original backup'
         [IO.File]::WriteAllBytes($workerPath, $previousBytes)
@@ -253,10 +350,41 @@ try {
     Write-DiagnosticReport $game $logFolder
     $report = Get-Content -LiteralPath (Join-Path $logFolder 'system-and-dll.txt') -Raw
     Assert ($report -match 'ACTIVE TALKER: verified q4') 'Q4 content under Q8 filename is clearly reported'
+    [IO.File]::WriteAllText((Join-Path $logFolder 'Player.log'), "[Qwen3 TTS] Worker stopped; using existing speech for this session. Qwen runtime checksum mismatch: QwenTtsWorker.exe`n[SpeechRequest] provider=moss stage=first_audio`n[SpeechRequest] provider=moss stage=completed succeeded=True cancelled=False`n[CallTrace] stage=ONLINE_AI_PRIMARY_RAW fallback=True error=cancelled`n")
+    Write-SpeechSummary $logFolder
+    $summary = Get-Content -LiteralPath (Join-Path $logFolder 'speech-summary.txt') -Raw
+    Assert ($summary -match 'ACTUAL SPEECH: MOSS only' -and $summary -match 'QWEN DISABLED DURING THIS RUN') 'Reported user failure explicitly identifies MOSS and disabled Qwen'
+    Assert ($summary -match 'Qwen runtime checksum mismatch: QwenTtsWorker.exe') 'Qwen disable reason retained'
+    Assert ($summary -match 'MOSS requests: succeeded=1; cancelled=0; failed=0; first_audio=1') 'MOSS results counted separately'
+    Assert ($summary -match 'Online dialogue fallbacks: 1') 'Dialogue cancellation not mislabelled as TTS failure'
     Remove-Item -LiteralPath (Join-Path $logFolder 'Player.log')
     Write-SpeechSummary $logFolder
     $summary = Get-Content -LiteralPath (Join-Path $logFolder 'speech-summary.txt') -Raw
     Assert ($summary -match 'Player.log is missing' -and $summary -notmatch 'NullReferenceException|Qwen requests:') 'Missing current log never substitutes stale results'
+    # Normal launches export recent automatic sessions without launching the game.
+    $autoRoot = Join-Path $testProfile 'swyf-qwen-logs'
+    for ($i = 1; $i -le 4; $i++) {
+        $name = 'session-20261024-00000' + $i + '-000-' + ('b' * 32)
+        $sessionFolder = Join-Path $autoRoot $name
+        New-Item -ItemType Directory -Path $sessionFolder -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $sessionFolder 'session.log'), "WORKER automatic $i`nCOMPLETE request=1")
+        [IO.File]::WriteAllBytes((Join-Path $sessionFolder 'audio-123-0001.wav'), [byte[]]@(82,73,70,70))
+        [IO.File]::WriteAllText((Join-Path $sessionFolder 'unrelated-secret.txt'), 'do not export')
+    }
+    [IO.File]::WriteAllText((Join-Path $testProfile 'Player.log'), '[SpeechRequest] provider=moss stage=first_audio')
+    $export = New-DiagnosticFolder 'normal'
+    Copy-PlayerLogs $export ''
+    Copy-RecentWorkerLogs $export
+    Write-SpeechSummary $export
+    $recentRoot = Join-Path $export 'recent-qwen-worker'
+    Assert (@(Get-ChildItem -LiteralPath $recentRoot -Directory).Count -eq 3) 'Normal export collects three recent worker sessions'
+    Assert (@(Get-ChildItem -LiteralPath $recentRoot -Filter '*.wav' -File -Recurse).Count -eq 3) 'Normal export includes automatic audio'
+    Assert (@(Get-ChildItem -LiteralPath $recentRoot -Filter '*secret*' -File -Recurse).Count -eq 0) 'Export excludes unrelated session files'
+    $summary = [IO.File]::ReadAllText((Join-Path $export 'speech-summary.txt'))
+    Assert ($summary -match 'RECENT AUTOMATIC WORKER SESSIONS' -and $summary -match 'WORKER automatic 4') 'Automatic worker evidence included with historical warning'
+    Assert ($summary -match 'ACTUAL SPEECH: MOSS only' -and $summary -notmatch 'WORKER automatic 1') 'Recent worker evidence cannot mask current MOSS fallback; oldest session excluded'
+    Complete-Diagnostics $export
+    Assert (Test-Path -LiteralPath ($export + '.zip')) 'Normal-launch diagnostics packaged without launching a process'
     $script:ModelSpecs = $realSpecs
     [IO.File]::WriteAllText((Join-Path $game ($GameName + '.exe')), 'not executed: mocked launcher fixture')
     $savedLogEnv = [Environment]::GetEnvironmentVariable('SWYF_QWEN_LOG_DIR')
@@ -281,6 +409,7 @@ try {
         [Environment]::SetEnvironmentVariable('SWYF_QWEN_CAPTURE', $savedCaptureEnv)
     }
     Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Original) 'Diagnostics did not patch DLL'
+    Assert ((Get-FileHash -LiteralPath (Join-Path $runtimeSource 'runtime-manifest.json')).Hash -eq $liveManifestBefore) 'User game manifest unchanged throughout tests'
     Assert ((Get-FileHash -LiteralPath (Join-Path $runtimeSource 'QwenTtsWorker.exe')).Hash -eq $liveWorkerBefore) 'User game worker unchanged throughout tests'
     Assert ((Get-FileHash -LiteralPath (Join-Path $managedSource 'Assembly-CSharp.dll')).Hash -eq $liveBefore) 'User game DLL unchanged throughout tests'
     Write-Host "PASS: $checks assertions. All mutable fixtures were under $testRoot"

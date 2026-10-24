@@ -12,16 +12,17 @@ using Qwen3TTS;
 
 [assembly: System.Reflection.AssemblyTitle("SwyfPatcher Qwen TTS Worker")]
 [assembly: System.Reflection.AssemblyProduct("SwyfPatcher")]
-[assembly: System.Reflection.AssemblyVersion("2.9.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("2.9.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("2.9.0")]
+[assembly: System.Reflection.AssemblyVersion("2.9.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2.9.2.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2.9.2")]
 
 internal static class Worker
 {
-    internal const string Build = "2.9.0";
+    internal const string Build = "2.9.2";
     internal const string Q4Hash = "4B468EC7B1F62B90EF4CA316C0AA57DEADFD54B2CF9651703EA753CEDAF04226";
     private static readonly object logLock = new object();
     private static StreamWriter logFile;
+    private static AutomaticLogs diagnostics;
     private static string logDirectory;
     private static BinaryWriter output;
     private static IntPtr context;
@@ -70,19 +71,15 @@ internal static class Worker
     }
     private static void OpenLog()
     {
-        try
-        {
-            logDirectory = Environment.GetEnvironmentVariable("SWYF_QWEN_LOG_DIR");
-            if (String.IsNullOrWhiteSpace(logDirectory))
-                logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    "AppData", "LocalLow", "Jatater Worldwide", "Scam With Your Friends", "swyf-qwen-logs");
-            Directory.CreateDirectory(logDirectory);
-            string name = "qwen-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture) + "-" + Process.GetCurrentProcess().Id;
-            logFile = new StreamWriter(new FileStream(Path.Combine(logDirectory, name + ".log"), FileMode.CreateNew, FileAccess.Write, FileShare.Read), new UTF8Encoding(false));
-            logFile.AutoFlush = true;
-            Log("WORKER " + Build + " pid=" + Process.GetCurrentProcess().Id + " pointerBytes=" + IntPtr.Size);
-        }
-        catch { logFile = null; }
+        string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "AppData", "LocalLow", "Jatater Worldwide", "Scam With Your Friends");
+        diagnostics = AutomaticLogs.Open(profile, Environment.GetEnvironmentVariable("SWYF_QWEN_LOG_DIR"),
+            Environment.GetEnvironmentVariable("SWYF_QWEN_CAPTURE"));
+        if (diagnostics == null) return;
+        logDirectory = diagnostics.DirectoryPath;
+        logFile = diagnostics.Writer;
+        Log("WORKER " + Build + " pid=" + Process.GetCurrentProcess().Id + " pointerBytes=" + IntPtr.Size);
+        Log("DIAGNOSTICS directory=" + logDirectory + " capture=" + diagnostics.CaptureAudio);
     }
     private static void Log(string message)
     {
@@ -90,7 +87,7 @@ internal static class Worker
         {
             lock (logLock)
                 if (logFile != null && logFile.BaseStream.Position < 8 * 1024 * 1024)
-                    logFile.WriteLine(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture) + " " + message.TrimEnd());
+                    logFile.WriteLine(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture) + " " + (message.Length > 32768 ? message.Substring(0, 32768) : message).TrimEnd());
         }
         catch { /* Logging must never break inference or a native callback. */ }
     }
@@ -135,7 +132,7 @@ internal static class Worker
     }
     private static void StartCapture()
     {
-        if (request > 6 || logDirectory == null || Environment.GetEnvironmentVariable("SWYF_QWEN_CAPTURE") != "1") return;
+        if (request > 6 || logDirectory == null || (diagnostics == null || !diagnostics.CaptureAudio)) return;
         try
         {
             string path = Path.Combine(logDirectory, "audio-" + Process.GetCurrentProcess().Id + "-" + request.ToString("D4") + ".wav");
@@ -146,7 +143,12 @@ internal static class Worker
             capture.Write(Encoding.ASCII.GetBytes("data")); capture.Write(0); capture.Flush();
             Log("CAPTURE " + Path.GetFileName(path));
         }
-        catch (Exception e) { Log("CAPTURE_ERROR " + e.Message); if (capture != null) capture.Dispose(); capture = null; }
+        catch (Exception e) { Log("CAPTURE_ERROR " + e.Message); StopCapture(); }
+    }
+    private static void StopCapture()
+    {
+        var current = capture; capture = null;
+        try { if (current != null) current.Dispose(); } catch { }
     }
     private static void Capture(float[] pcm)
     {
@@ -159,7 +161,7 @@ internal static class Worker
             capture.BaseStream.Position = 40; capture.Write((int)end - 44);
             capture.BaseStream.Position = end; capture.Flush();
         }
-        catch (Exception e) { Log("CAPTURE_ERROR " + e.Message); capture.Dispose(); capture = null; }
+        catch (Exception e) { Log("CAPTURE_ERROR " + e.Message); StopCapture(); }
     }
     private static bool SendChunk(IntPtr pointer, int count, IntPtr unused)
     {
@@ -202,7 +204,7 @@ internal static class Worker
         }
         finally
         {
-            if (capture != null) { capture.Dispose(); capture = null; }
+            StopCapture();
             Native.qt_audio_free(ref audio); Native.qt_voice_ref_free(ref voice); pinned.Free();
         }
     }
@@ -247,6 +249,6 @@ internal static class Worker
                 finally { if (context != IntPtr.Zero) { Native.qt_free(context); context = IntPtr.Zero; } }
             }
         }
-        finally { Log("WORKER_EXIT"); if (logFile != null) logFile.Dispose(); }
+        finally { Log("WORKER_EXIT"); if (diagnostics != null) diagnostics.Dispose(); }
     }
 }

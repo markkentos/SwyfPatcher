@@ -1,43 +1,37 @@
-# 2.9.0: проверка изменения Q4
+# Проверки 2.9.2 / Validation
 
-## Что подтверждено
+[Русский](../README.md) · [English](../README.en.md)
 
-- В пользовательском тесте Q8 от 24.10.2026 17:56 обе реплики завершились (`succeeded=True`, 23,172 / 21,663 мс), пользователь подтвердил нормальный звук.
-- В тесте Q4 от 17:59 SHA-256 модели правильный; DLL, codec, runtime и режим auto совпадают. Пользователь сообщил о рычании на GPU/Vulkan и ещё не пробовал CPU. Отмена запроса при закрытии игры не объясняет качество предыдущих аудиоблоков.
-- Нативная `qwen3.dll` сообщает версию `1a680e8 (2026-07-05)`. Для локального воспроизведения собраны этот commit qwentts.cpp и его ggml `e805cdc0f234eebc9dda1360ad0847b83fd12731`, CPU backend на Mac. Это проверка синтезатора, не запуск Windows-игры.
-- С теми же Q4/Q8/codec и первыми 10 секундами голоса Donald Dump из игры выполнен потоковый x-vector-only синтез: референс извлечён через `qt_extract_voice_ref`, затем передан только speaker embedding, как в игровом воркере.
-- Контрольный текст: «Здравствуйте. Меня зовут Дональд. Я хочу узнать, сколько стоит этот компьютер.» Seed=42, CPU. Q4: 7,04 с аудио, Q8: 7,92 с; нет NaN/Inf или значений вне [-1, 1]. Локальный Whisper base распознал текст Q4 с «Дональт» вместо «Дональд», Q8 — дословно. Это поддерживает гипотезу проблемы GPU-пути, но не является прослушиванием или доказательством исправления NVIDIA.
+## Русский
 
-## Что изменено
+Проверено локально на macOS, 24 октября 2026. Windows-игра здесь не запускалась.
 
-Вместо перепаковки моделей устанавливается совместимый управляемый воркер. Его формат двоичных сообщений совпадает с наблюдаемым протоколом игры:
+- **422 проверки патчера** в PowerShell 7.4.6: установка, восстановление, смена моделей, миграции DLL 22/24 октября, обновление воркера 2.9.0/2.9.1, все 25 записей манифеста, бэкапы, ошибки записи и конкурентные изменения. Также проверены девять пунктов RU/EN, сбор автоматических логов и WAV, отделение старых сеансов от текущих счётчиков речи. Windows process/registry API подменены; все изменяемые файлы — временные копии. Исходные DLL, воркер и манифест пользовательской игры остались неизменными.
+- **16 проверок автологов**: запись без переменных окружения, сохранение первых шести WAV, обновление заголовка WAV до выхода, отключение аудио, недоступная папка, ротация десяти сеансов, сохранение работающего воркера и посторонних файлов. Ошибки записи и закрытия WAV не выходят в синтез.
+- **Четыре случая выбора режима Q4**: совместимость включается только для точного хеша Q4 + Vulkan0; Q8 и CPU её не используют.
+- **Реальный бинарный протокол итогового PE-воркера 2.9.2** через PowerShell и локальную CPU-сборку соответствующего native runtime. Q4: 74 блока / 5,92 с аудио; Q8: 97 блоков / 7,76 с. Все семплы конечны, генерация и EOF завершаются штатно. WAV включён по умолчанию без `SWYF_QWEN_CAPTURE`; число семплов совпало с потоком в игру. Это длительность аудио, не скорость генерации.
 
-- команда 1: пути моделей и backend; ответ 1, 1 после загрузки;
-- команда 2: текст, язык, длина и float32-референс;
-- ответ 2: длина и float32-аудиоблок, ответ 3: завершение;
-- ответ 4: строка ошибки в формате BinaryWriter.Write(string).
+Воркер: .NET Framework 4.7.2, AnyCPU без Prefer32Bit. SHA-256: `3F5236375D4BCB5E90BCC4E4DA51984E7A5BC147A88FF48CABE198A92B735AFB`.
 
-При точном хеше Q4 и Vulkan0 выключаются FP16 compute, MMVQ, cooperative matrices, graph optimize/fusion и flash attention. Модель остаётся исходной Q4, GPU остаётся Vulkan0. Это целевой обход старого GPU-пути; какой именно его участок вызвал пользовательское рычание, пока не доказано. Режим не включается для Q8 или CPU.
+### Что ещё проверить на Windows
 
-Настройки передаются в нативную CRT через `_putenv_s` в Windows (и `setenv` в Mac-проверках), дополнительно к `Environment.SetEnvironmentVariable`. Это обеспечивает видимость параметров для C `getenv`, а не только для управляемого окружения. Установка выполняется до инициализации GGML. Параметры остаются внутри процесса воркера.
+Обычный запуск через Steam/EXE, появление ярлыка `SwyfPatcher Logs`, выделение ZIP в Проводнике и качество голоса, особенно Q4/Vulkan и Dark Hater. Windows PowerShell 5.1, WScript COM и NVIDIA/Vulkan здесь не запускались. Текстовые нативные логи содержат callbacks Qwen/GGML, но могут не включать сообщения, записанные библиотекой напрямую в stderr.
 
-## Выполненные проверки
+В пользовательском отчёте перед 2.9.1 Qwen был отключён из-за несовпадения хеша воркера и манифеста: все семь реплик озвучивал MOSS. Исправление манифеста покрыто регрессионными проверками. Этот отчёт не доказывает качество Qwen для Dark Hater. Отмены онлайн-запросов диалога и ошибка Unity UI из того же отчёта не имеют доказанной связи с патчем и этим релизом не исправляются.
 
-1. **284 проверки PowerShell**: варианты и миграции DLL 24/22 октября; точные хеши; установка и оригинальный бэкап воркера; откат; отказ на неизвестном runtime/воркере до изменений; обновление и откат предыдущего локального воркера, отказ при отсутствии оригинального бэкапа; смена Q4/Q8 и ошибочные загрузки; плоское меню RU/EN и сохранение языка; изоляция проверки от установки; текущие/исторические логи; передача и восстановление окружения тестового запуска при ошибке. Для полного прохода переданы также необязательные фикстуры DLL 22 октября и предыдущего локального воркера. Изменяемые файлы — временные копии; Windows process/registry API подменены.
-2. **Реальный протокол собранного .NET-воркера**: тот же PE-файл загружен через PowerShell 7 на Mac и вызван с бинарными stdin/stdout, с локальной CPU-сборкой того же native runtime. Q4 и Q8 прошли загрузку, потоковую генерацию, корректное завершение и EOF; WAV совпал по числу семплов с данными pipe. Итоговый проход сборки 2.9.0: Q4 74 блока / 5,92 с, Q8 64 блока / 5,12 с. Здесь seed остаётся случайным, как в игре.
-3. **Путь Q4/Vulkan** без GPU: режим включился до native init (`use_fa=False`, нужные переменные установлены); нативный runtime вернул `GGML_BACKEND=Vulkan0 not found`, воркер передал штатную ошибку, не переключился на CPU. Это проверяет выбор режима и отсутствие скрытого fallback, не вычисления на Vulkan.
-4. **ABI/упаковка**: собран .NET Framework 4.7.2 PE с CLR v4.0.30319, IL-only, без Prefer32Bit. Размеры init/tts-структур в 64-битном процессе: 32 / 192 байта. Все используемые native exports проверены в игровых DLL. PowerShell-файлы — UTF-8 BOM / CRLF для Windows PowerShell 5.1.
-5. **UI**: выполнен проход RU → EN → проверка → RU → выход. Ни игровая DLL, ни воркер в исходной локальной игре не менялись.
+## English
 
-## Что ещё требуется
+Checked locally on macOS on October 24, 2026. The Windows game was not run here.
 
-Проверить Q4/Vulkan на пользовательской RTX 3050 Laptop, включая разборчивость и скорость. Если речь остаётся искажённой, тестовый ZIP теперь содержит фактическую озвучку первых шести реплик и нативный журнал. Нельзя считать исчезновение проблемы подтверждённым по одному `first_audio` или `succeeded=True`.
+- **422 patcher assertions** with PowerShell 7.4.6 cover install/restore, model changes, both game DLL fixtures, upgrades from the 2.9.0/2.9.1 worker, all 25 manifest entries, backups, write failures, and concurrent changes. They also cover the nine-option RU/EN menu, automatic log/audio export, and separation of older worker sessions from current speech counts. Windows process/registry APIs are mocked; writes target temporary copies. The user's game DLL, worker, and manifest remain unchanged.
+- **16 automatic logging assertions** cover defaults without environment variables, six-reply WAV capture, live WAV headers, capture opt-out, inaccessible folders, ten-session retention, and preservation of active sessions and unrelated files. WAV write/close errors do not propagate into synthesis.
+- **Four Q4 policy cases** confirm that compatibility mode applies only to the verified Q4 hash with Vulkan0, not Q8 or CPU.
+- **Actual binary protocol of the final 2.9.2 PE worker**, loaded through PowerShell with a matching native CPU runtime. Q4 produced 74 chunks / 5.92 seconds of audio; Q8 produced 97 chunks / 7.76 seconds. Samples were finite and generation/EOF completed normally. WAV capture worked without `SWYF_QWEN_CAPTURE`; its sample count matched the game-facing stream. These are audio durations, not generation times.
 
-Новый воркер может писать журналы и при обычном запуске игры. WAV включён только для тестов из патчера; записывается исходящий синтез, не микрофон.
+Worker target: .NET Framework 4.7.2, AnyCPU without Prefer32Bit. SHA-256: `3F5236375D4BCB5E90BCC4E4DA51984E7A5BC147A88FF48CABE198A92B735AFB`.
 
-## Источники реализации
+### Still needs Windows testing
 
-- [Точная версия qwentts.cpp](https://github.com/ServeurpersoCom/qwentts.cpp/tree/1a680e88161e606377e133c349210fd1034467f1)
-- [Переключатели Vulkan в ggml этой версии](https://github.com/ServeurpersoCom/ggml/blob/e805cdc0f234eebc9dda1360ad0847b83fd12731/src/ggml-vulkan/ggml-vulkan.cpp)
-- [C# ABI bindings lookbe](https://github.com/lookbe/qwen3-tts-unity/blob/8fcffb4dfc544117258341ef2e4eace316016430/Runtime/Native/Qwen3Native.cs)
-- [Microsoft: `_putenv_s` и окружение CRT](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/putenv-s-wputenv-s?view=msvc-170)
+Normal Steam/EXE launch, the `SwyfPatcher Logs` shortcut, highlighting the ZIP in File Explorer, and voice quality, particularly Q4/Vulkan and Dark Hater. Windows PowerShell 5.1, WScript COM, and NVIDIA/Vulkan were not exercised locally. Native logs capture Qwen/GGML callbacks but may omit direct library stderr output.
+
+The user report before 2.9.1 showed Qwen disabled by a worker/manifest checksum mismatch; all seven replies used MOSS. Manifest repair now has regression coverage. That report cannot establish Qwen's voice quality for Dark Hater. Separate online dialogue cancellations and a Unity UI exception have no established causal link to this patch and are outside this release.

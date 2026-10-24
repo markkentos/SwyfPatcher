@@ -29,7 +29,7 @@ function Show-MainMenu {
     Write-Host (T '  [4] Переключить на GPU (Vulkan)' '  [4] Switch to GPU (Vulkan)')
     Write-Host (T '  [5] Включить Q4' '  [5] Use Q4')
     Write-Host (T '  [6] Включить Q8' '  [6] Use Q8')
-    Write-Host (T '  [7] Запустить игру + логи' '  [7] Launch game + logs')
+    Write-Host (T '  [7] Собрать логи в ZIP' '  [7] Collect logs as ZIP')
     Write-Host '  [8] Русский / English'
     Write-Host (T '  [0] Выход' '  [0] Exit')
 }

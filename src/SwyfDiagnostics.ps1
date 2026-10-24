@@ -1,4 +1,23 @@
-﻿function New-DiagnosticFolder([string]$label) {
+﻿function Install-LogShortcut([string]$game) {
+    # Logging uses the writable per-user Unity profile even if Steam is on another drive.
+    $profile = Get-ProfileDir
+    Write-Host (T "Папка логов: $profile" "Log folder: $profile")
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return }
+    New-Item -ItemType Directory -Path (Join-Path $profile 'swyf-qwen-logs') -Force | Out-Null
+    $path = Join-Path $game 'SwyfPatcher Logs.lnk'
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $shortcut = $shell.CreateShortcut($path)
+        if ((Test-Path -LiteralPath $path) -and $shortcut.TargetPath -ne $profile) { throw 'An unrelated log shortcut already exists; preserving it.' }
+        $shortcut.TargetPath = $profile
+        $shortcut.Description = 'SwyfPatcher: Player.log + swyf-qwen-logs. Use patcher option 7 to export only diagnostics.'
+        $shortcut.Save()
+    } finally {
+        if ($null -ne $shortcut) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut) }
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+    }
+}
+function New-DiagnosticFolder([string]$label) {
     $directory = Join-Path $PatcherRoot ('logs/' + $label + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6))
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
     return $directory
@@ -58,7 +77,7 @@ function Write-DiagnosticReport([string]$game, [string]$directory) {
             if (-not $file.StartsWith($runtimeRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Runtime manifest path is outside its directory.' }
             $hash = if (Test-Path -LiteralPath $file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash } else { 'MISSING' }
             $knownWorker = $entry.path -eq 'QwenTtsWorker.exe' -and $hash -in (@($RuntimeSpec.PatchedWorker) + @($RuntimeSpec.PreviousWorkers))
-            [void]$report.Add("RUNTIME $($entry.path); upstreamMatch=$($hash -eq $entry.sha256); knownLocalWorker=$knownWorker; SHA256=$hash")
+            [void]$report.Add("RUNTIME $($entry.path); manifestMatch=$($hash -eq $entry.sha256); knownLocalWorker=$knownWorker; SHA256=$hash")
         }
     } catch { [void]$report.Add('Runtime check: ' + $_.Exception.Message) }
     [void]$report.Add('Vulkan0 is the worker backend; the Unity renderer device does not prove the worker device.')
@@ -75,6 +94,8 @@ function Write-SpeechSummary([string]$directory) {
     $current = Join-Path $directory 'Player.log'
     if (Test-Path -LiteralPath $current) {
         $lineNumber = 0; $firstAudio = 0; $succeeded = 0; $cancelled = 0; $failed = 0
+        $mossAudio = 0; $mossSucceeded = 0; $mossCancelled = 0; $mossFailed = 0; $dialogueFallbacks = 0
+        $qwenStopped = New-Object 'System.Collections.Generic.List[string]' 
         foreach ($line in Get-Content -LiteralPath $current -Encoding UTF8) {
             $lineNumber++
             if ($line -match '\[SpeechRequest\].*provider=qwen\b') {
@@ -85,11 +106,32 @@ function Write-SpeechSummary([string]$directory) {
                     elseif ($line -match '\bsucceeded=False\b') { $failed++ }
                 }
             }
+            if ($line -match '\[SpeechRequest\].*provider=moss\b') {
+                if ($line -match '\bstage=first_audio\b') { $mossAudio++ }
+                if ($line -match '\bstage=completed\b') {
+                    if ($line -match '\bcancelled=True\b') { $mossCancelled++ }
+                    elseif ($line -match '\bsucceeded=True\b') { $mossSucceeded++ }
+                    elseif ($line -match '\bsucceeded=False\b') { $mossFailed++ }
+                }
+            }
+            if ($line -match '\[Qwen3 TTS\].*Worker stopped') { [void]$qwenStopped.Add($line) }
+            if ($line -match 'stage=ONLINE_AI_PRIMARY_RAW\s+fallback=True') { $dialogueFallbacks++ }
             if ($line -match '\[Startup\]|\[SpeechRequest\]|\[Speech\]|\[Qwen|\b\w*Exception\b(?!\s*=\s*none\b)|No audio progress|Slow non-English|\[Shutdown\]') {
                 [void]$selected.Add("${lineNumber}: $line")
             }
         }
         [void]$lines.Add("Qwen requests: succeeded=$succeeded; cancelled=$cancelled; failed=$failed; first_audio=$firstAudio")
+        [void]$lines.Add("MOSS requests: succeeded=$mossSucceeded; cancelled=$mossCancelled; failed=$mossFailed; first_audio=$mossAudio")
+        if ($qwenStopped.Count) {
+            [void]$lines.Add('QWEN DISABLED DURING THIS RUN:')
+            $lines.AddRange($qwenStopped)
+        }
+        if ($firstAudio -eq 0 -and $mossAudio -gt 0) {
+            [void]$lines.Add('ACTUAL SPEECH: MOSS only. No Qwen audio was produced; this run cannot validate Qwen voice quality.')
+        } elseif ($firstAudio -gt 0 -and $mossAudio -gt 0) { [void]$lines.Add('ACTUAL SPEECH: mixed Qwen and MOSS.') }
+        elseif ($firstAudio -gt 0) { [void]$lines.Add('ACTUAL SPEECH: Qwen.') }
+        else { [void]$lines.Add('ACTUAL SPEECH: no first-audio events in the current log.') }
+        [void]$lines.Add("Online dialogue fallbacks: $dialogueFallbacks (separate from speech synthesis).")
         [void]$lines.Add("`nFILE: Player.log")
         $lines.AddRange($selected)
     } else {
@@ -111,10 +153,24 @@ function Write-SpeechSummary([string]$directory) {
             }
         }
     }
+    $recent = Join-Path $directory 'recent-qwen-worker'
+    if (Test-Path -LiteralPath $recent) {
+        [void]$lines.Add("`nRECENT AUTOMATIC WORKER SESSIONS (may include older launches; excluded from current-run counts):")
+        foreach ($file in @(Get-ChildItem -LiteralPath $recent -Filter '*.log' -File -Recurse)) {
+            [void]$lines.Add("FILE: $($file.Directory.Name)/$($file.Name)")
+            foreach ($line in Get-Content -LiteralPath $file.FullName -Encoding UTF8) {
+                if ($line -match 'WORKER |LOAD |PROFILE |INIT |backend:|FIRST_AUDIO|COMPLETE|ERROR|NONFINITE|CAPTURE|WORKER_EXIT') { [void]$lines.Add($line) }
+            }
+        }
+    }
     [IO.File]::WriteAllLines((Join-Path $directory 'speech-summary.txt'), $lines, (New-Object Text.UTF8Encoding $true))
 }
 function Complete-Diagnostics([string]$directory) {
     Write-SpeechSummary $directory
+    $summary = [IO.File]::ReadAllText((Join-Path $directory 'speech-summary.txt'))
+    if ($summary -match 'QWEN DISABLED DURING THIS RUN|ACTUAL SPEECH: MOSS only') {
+        Write-Warn2 (T 'В этом запуске Qwen отключился или речь шла только через MOSS. Причина указана в speech-summary.txt.' 'Qwen was disabled or only MOSS produced speech in this run. See speech-summary.txt for the reason.')
+    }
     if ($script:SessionLog -and (Test-Path -LiteralPath $script:SessionLog)) {
         try { Copy-Item -LiteralPath $script:SessionLog -Destination (Join-Path $directory 'patcher-session.log') }
         catch { Write-Warn2 (T 'Журнал не скопирован в ZIP; он сохранён рядом, в logs/.' 'Current transcript could not be copied; it is kept in logs/ beside this folder.') }
@@ -127,25 +183,45 @@ function Complete-Diagnostics([string]$directory) {
 function Copy-RecentWorkerLogs([string]$directory) {
     $source = Join-Path (Get-ProfileDir) 'swyf-qwen-logs'
     if (-not (Test-Path -LiteralPath $source)) { return }
-    $target = Join-Path $directory 'previous-qwen-worker'
+    $target = Join-Path $directory 'recent-qwen-worker'
     New-Item -ItemType Directory -Path $target -Force | Out-Null
-    foreach ($file in @(Get-ChildItem -LiteralPath $source -Filter 'qwen-*.log' -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 3)) {
+    [IO.File]::WriteAllText((Join-Path $target 'README.txt'), 'Recent automatic worker sessions. They can include older game launches; match timestamps with Player.log. WAV files contain generated speech, not microphone recordings.')
+    $sessions = @(Get-ChildItem -LiteralPath $source -Directory | Where-Object {
+        $_.Name -match '^session-\d{8}-\d{6}-\d{3}-[a-f0-9]{32}$' -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    } | Sort-Object Name -Descending | Select-Object -First 3)
+    foreach ($session in $sessions) {
+        $destination = Join-Path $target $session.Name
+        New-Item -ItemType Directory -Path $destination -Force | Out-Null
+        foreach ($file in @(Get-ChildItem -LiteralPath $session.FullName -File | Where-Object {
+            $_.Name -match '^(session\.log|audio-\d+-\d{4}\.wav)$' -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        })) {
+            try { Copy-Item -LiteralPath $file.FullName -Destination $destination }
+            catch { Write-Warn2 $_.Exception.Message }
+        }
+    }
+    # Also keep old-format worker logs when upgrading from 2.9.0/2.9.1.
+    foreach ($file in @(Get-ChildItem -LiteralPath $source -Filter 'qwen-*.log' -File | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 3)) {
         try { Copy-Item -LiteralPath $file.FullName -Destination $target }
         catch { Write-Warn2 $_.Exception.Message }
     }
 }
 function Save-Diagnostics([string]$game) {
     $directory = New-DiagnosticFolder 'diagnostics'
-    [IO.File]::WriteAllText((Join-Path $directory 'log-source.txt'), 'Collected from the standard Unity profile. This can be an older normal launch. Tests started through the patcher have their own logs/test-*/Player.log and ZIP.')
+    [IO.File]::WriteAllText((Join-Path $directory 'log-source.txt'), 'Collected from the standard Unity profile after a normal Steam/EXE launch. Player.log can be from an older launch if no new one has started. recent-qwen-worker contains up to 3 recent worker sessions, not necessarily this game launch. Explicit --launch tests have their own logs/test-*/Player.log and ZIP.')
     Copy-PlayerLogs $directory ''
     Copy-RecentWorkerLogs $directory
     Write-DiagnosticReport $game $directory
     Complete-Diagnostics $directory
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('/select,"' + $directory + '.zip"') | Out-Null }
+        catch { Write-Warn2 (T 'ZIP сохранён, но открыть Проводник не удалось.' 'ZIP saved, but File Explorer could not be opened.') }
+    }
 }
 function Invoke-TestLaunch([string]$game) {
     Assert-GameClosed
     $exe = Join-Path $game ($GameName + '.exe')
     if (-not (Test-Path -LiteralPath $exe)) { throw 'Game executable not found.' }
+    Assert-RuntimeManifestReady $game
     $directory = New-DiagnosticFolder 'test'
     [IO.File]::WriteAllText((Join-Path $directory 'log-source.txt'), 'This test writes directly to Player.log through -logFile. before-/after- snapshots are from the separate standard Unity profile and may be stale.')
     Copy-PlayerLogs $directory 'before-'
