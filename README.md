@@ -41,28 +41,28 @@ SwyfPatch.bat --backend cpu --check "D:\Games\Scam With Your Friends"
 
 ## Поддерживаемые сборки игры
 
-Совместимость определяется по точным SHA-256 `Assembly-CSharp.dll` (плюс проверяются `ScriptsAssDef.dll` и `Kolkata.Speech.dll`), а не по номеру версии. Поддерживаются сборки от **2026-10-24** и **2026-10-22** (полный функционал, включая `--backend` и `--model`) и от **2026-10-19** (только `auto`). Пропатченные DLL старого формата (до v2.7) распознаются и автоматически обновляются при следующем запуске.
+Совместимость определяется по точным SHA-256 `Assembly-CSharp.dll` (плюс проверяются `ScriptsAssDef.dll` и `Kolkata.Speech.dll`), а не по номеру версии. Основная цель — **игра версии 0.1.84** (обновление Steam от 24.10.2026, buildid 26176038): полный функционал. Также поддерживаются **0.1.83** (сборка 22.10.2026) и сборка 19.10.2026. Пропатченные DLL старого формата (до v2.7) распознаются и автоматически обновляются при следующем запуске.
 
 <details>
 <summary>Контрольные суммы SHA-256</summary>
 
-| Файл | Состояние | SHA-256 |
-|---|---|---|
-| Assembly-CSharp.dll (2026-10-24) | оригинал | `978fd1b5c50f28b523ba49145a9f716a3c2c9cb3ded20bbb175976116ad2020e` |
-| Assembly-CSharp.dll (2026-10-24) | патч auto | `2834a771e05b3cd7a7104d37267e8a106c09d28c8ba3a84733396e145d9a6582` |
-| Assembly-CSharp.dll (2026-10-24) | патч cpu | `60404f5a5912533a26a3bb43b69c8fc0601c23fd1cf7ff5ada01550b2733db85` |
-| Assembly-CSharp.dll (2026-10-24) | патч vulkan | `b25fc6a03702c043dcd54de20edead809e3c4d74a6d27090230e2e5834a510cb` |
-| ScriptsAssDef.dll (2026-10-24) | оригинал | `07e6bf770800ee75ddc3c5953232fe2cbbb2e85dd9933c0231092e0f3db43403` |
-| Kolkata.Speech.dll (2026-10-24) | оригинал | `737e28564e6be0f5d5ce28d679af78b2d616fbf5591225e5e83ea0a26945d66d` |
-| Assembly-CSharp.dll (2026-10-22) | оригинал | `f94b92369d2ac0f7c1f10a30ae6a1c7fc4cee99c538693c162b1a7fdc02a2bb2` |
-| Assembly-CSharp.dll (2026-10-22) | патч auto (v2.7) | `c162a0aada0d1e7799d3669eae0bf5d40098724a13baf964dd2e11c9807b5497` |
-| Assembly-CSharp.dll (2026-10-22) | патч cpu (v2.7) | `dc3868a57f0d6903e1fadb2ff9e43b72ebb382567d2b6a3c3af1d3182d076cd5` |
-| Assembly-CSharp.dll (2026-10-22) | патч vulkan (v2.7) | `6a4f244651d9fd4774535bb5419e1b3bb6b600dfde3427f4d5aefb10fe2d51c0` |
-| ScriptsAssDef.dll (2026-10-22) | оригинал | `5432d089e0e9c93b1a74addaf27ec240758fc2a183ec913ca41d9949c46e0a84` |
-| Kolkata.Speech.dll (2026-10-22) | оригинал | `7f5a3ec065e87d85705f14b36e490e7bf2b0a1c95300813e7d9d197836becf6b` |
-| Assembly-CSharp.dll (2026-10-19) | оригинал | `1848ce450ab489b14539a2b2b0c995599965dde03a61479a15772ddf17c24025` |
-| Assembly-CSharp.dll (2026-10-19) | патч auto | `a09ab9c67b229007199d6202e8de11ce1e0b0a4f4785e66317a8fac4fb98fb7a` |
-| ScriptsAssDef.dll (2026-10-19) | оригинал | `0125ea190318ed20b09041eef0303ba3a73355d6073dab131c2234bcd471fefc` |
+| Файл | Версия игры | Состояние | SHA-256 |
+|---|---|---|---|
+| Assembly-CSharp.dll | **0.1.84** (24.10) | оригинал | `978fd1b5c50f28b523ba49145a9f716a3c2c9cb3ded20bbb175976116ad2020e` |
+| Assembly-CSharp.dll | **0.1.84** | патч auto | `2834a771e05b3cd7a7104d37267e8a106c09d28c8ba3a84733396e145d9a6582` |
+| Assembly-CSharp.dll | **0.1.84** | патч cpu | `60404f5a5912533a26a3bb43b69c8fc0601c23fd1cf7ff5ada01550b2733db85` |
+| Assembly-CSharp.dll | **0.1.84** | патч vulkan | `b25fc6a03702c043dcd54de20edead809e3c4d74a6d27090230e2e5834a510cb` |
+| ScriptsAssDef.dll | 0.1.84 | оригинал | `07e6bf770800ee75ddc3c5953232fe2cbbb2e85dd9933c0231092e0f3db43403` |
+| Kolkata.Speech.dll | 0.1.84 | оригинал | `737e28564e6be0f5d5ce28d679af78b2d616fbf5591225e5e83ea0a26945d66d` |
+| Assembly-CSharp.dll | 0.1.83 (22.10) | оригинал | `f94b92369d2ac0f7c1f10a30ae6a1c7fc4cee99c538693c162b1a7fdc02a2bb2` |
+| Assembly-CSharp.dll | 0.1.83 | патч auto (v2.7+) | `c162a0aada0d1e7799d3669eae0bf5d40098724a13baf964dd2e11c9807b5497` |
+| Assembly-CSharp.dll | 0.1.83 | патч cpu (v2.7+) | `dc3868a57f0d6903e1fadb2ff9e43b72ebb382567d2b6a3c3af1d3182d076cd5` |
+| Assembly-CSharp.dll | 0.1.83 | патч vulkan (v2.7+) | `6a4f244651d9fd4774535bb5419e1b3bb6b600dfde3427f4d5aefb10fe2d51c0` |
+| ScriptsAssDef.dll | 0.1.83 | оригинал | `5432d089e0e9c93b1a74addaf27ec240758fc2a183ec913ca41d9949c46e0a84` |
+| Kolkata.Speech.dll | 0.1.83 | оригинал | `7f5a3ec065e87d85705f14b36e490e7bf2b0a1c95300813e7d9d197836becf6b` |
+| Assembly-CSharp.dll | 19.10 | оригинал | `1848ce450ab489b14539a2b2b0c995599965dde03a61479a15772ddf17c24025` |
+| Assembly-CSharp.dll | 19.10 | патч auto | `a09ab9c67b229007199d6202e8de11ce1e0b0a4f4785e66317a8fac4fb98fb7a` |
+| ScriptsAssDef.dll | 19.10 | оригинал | `0125ea190318ed20b09041eef0303ba3a73355d6073dab131c2234bcd471fefc` |
 
 </details>
 
