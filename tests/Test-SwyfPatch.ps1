@@ -33,9 +33,21 @@ try {
         [IO.File]::WriteAllBytes((Join-Path $cache $ModelSpecs[$kind].Name), $bytes)
     }
     $managedSource = Join-Path $GameRoot ($GameName + '_Data/Managed')
-    $original = [IO.File]::ReadAllBytes((Join-Path $managedSource 'Assembly-CSharp.dll.swyf.original'))
-    $build = $Builds[0]
+    # The fixture original may live under any supported backup suffix; prefer the newest build.
+    $build = $null; $fixturePath = $null
+    foreach ($candidate in $Builds) {
+        foreach ($suffix in @('.swyf.original', '.swyf-v23.original', '.swyf-v22.original', ('.swyf.' + $candidate.Original.Substring(0, 12) + '.original'))) {
+            $path = Join-Path $managedSource ('Assembly-CSharp.dll' + $suffix)
+            if ((Test-Path -LiteralPath $path) -and (Get-FileHash -LiteralPath $path).Hash -eq $candidate.Original) { $build = $candidate; $fixturePath = $path; break }
+        }
+        if ($build) { break }
+    }
+    if (-not $build) { throw "No backup fixture matching a supported build was found in $managedSource." }
+    $original = [IO.File]::ReadAllBytes($fixturePath)
     Assert ((Sha256Hex $original) -eq $build.Original) 'Correct supplied original fixture'
+    $verifyEdit = @($build.Edits | Where-Object { $_.d -like 'Model verification*' } | Select-Object -First 1)
+    $startupBranch = if ($verifyEdit) { $verifyEdit.o + 3 } else { $null }
+    $referenceOffset = (@($build.Edits | Where-Object { $_.Reference })[0]).o
     $liveBefore = (Get-FileHash -LiteralPath (Join-Path $managedSource 'Assembly-CSharp.dll')).Hash
     $game = Join-Path $testRoot 'Game with spaces'
     $managed = Join-Path $game ($GameName + '_Data/Managed')
@@ -50,8 +62,18 @@ try {
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $runtimeSource $name) -Destination $destination
     }
+    # An upgraded install keeps pristine worker/manifest copies; the fixture mirrors that layout.
+    foreach ($name in @('QwenTtsWorker.exe.swyf.original', 'runtime-manifest.json.swyf.original')) {
+        $source = Join-Path $runtimeSource $name
+        if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination (Join-Path $runtime $name) }
+    }
     $manifestPath = Join-Path $runtime 'runtime-manifest.json'
-    $originalManifestBytes = [IO.File]::ReadAllBytes($manifestPath)
+    # A previously patched game keeps pristine copies as .swyf.original backups; a fresh install keeps live originals.
+    $sourceManifestPath = Join-Path $runtimeSource 'runtime-manifest.json'
+    $sourceWorkerPath = Join-Path $runtimeSource 'QwenTtsWorker.exe'
+    $pristineManifest = Join-Path $runtimeSource 'runtime-manifest.json.swyf.original'
+    $pristineWorker = $sourceWorkerPath + '.swyf.original'
+    $originalManifestBytes = if (Test-Path -LiteralPath $pristineManifest) { [IO.File]::ReadAllBytes($pristineManifest) } else { [IO.File]::ReadAllBytes($sourceManifestPath) }
     $liveManifestBefore = (Get-FileHash -LiteralPath (Join-Path $runtimeSource 'runtime-manifest.json')).Hash
     function Assert-AllRuntimeChecksums([string]$label) {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -68,8 +90,8 @@ try {
         foreach ($reference in @(3, 10)) {
             $plan = Get-PatchPlan (Make-Context $original $build) $backend $reference
             $states.Add(@{ Name = "$backend-ref$reference"; Bytes = $plan.Output })
-            if ($reference -eq 3) {
-                $old = [byte[]]$plan.Output.Clone(); $old[0x8AF8F] = 0x8F
+            if ($reference -eq 3 -and $startupBranch -and $LegacyPatched.ContainsKey($build.Original)) {
+                $old = [byte[]]$plan.Output.Clone(); $old[$startupBranch] = 0x8F
                 Assert ($LegacyPatched[$build.Original].ContainsKey((Sha256Hex $old))) 'Recognize v2.8 output hash'
                 $states.Add(@{ Name = "v28-$backend"; Bytes = $old })
             }
@@ -82,19 +104,24 @@ try {
             foreach ($reference in @(3, 10)) {
                 $plan = Get-PatchPlan $ctx $backend $reference
                 Assert ((Sha256Hex $plan.Source) -eq $build.Original) "$($state.Name): exact original reconstruction"
-                Assert ($plan.Output[0x8AF8F] -eq 0xAC) "$($state.Name): valid startup branch"
-                Assert ($plan.Output[0x8BA06] -eq $reference) "$($state.Name): reference selection"
+                if ($startupBranch) { Assert ($plan.Output[$startupBranch] -eq 0xAC) "$($state.Name): valid startup branch" }
+                Assert ($plan.Output[$referenceOffset] -eq $reference) "$($state.Name): reference selection"
             }
         }
     }
     if ($OldOriginal) {
         $oldBytes = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $OldOriginal).Path)
+        $oldBuild = @($Builds | Where-Object { $_.Original -eq (Sha256Hex $oldBytes) })
+        if (-not $oldBuild) { throw 'Old original does not match any supported build.' }
+        $oldBuild = $oldBuild[0]
+        $oldVerify = @($oldBuild.Edits | Where-Object { $_.d -like 'Model verification*' } | Select-Object -First 1)
+        $oldReferenceOffset = (@($oldBuild.Edits | Where-Object { $_.Reference })[0]).o
         foreach ($backend in @('auto', 'cpu', 'vulkan')) {
             foreach ($reference in @(3, 10)) {
-                $plan = Get-PatchPlan (Make-Context $oldBytes $Builds[1]) $backend $reference
-                Assert ((Sha256Hex $plan.Source) -eq $Builds[1].Original) '22 Oct original reconstruction'
-                Assert ($plan.Output[0x1213AF] -eq 0xAC) '22 Oct startup branch corrected'
-                Assert ($plan.Output[0x121E26] -eq $reference) '22 Oct reference selection'
+                $plan = Get-PatchPlan (Make-Context $oldBytes $oldBuild) $backend $reference
+                Assert ((Sha256Hex $plan.Source) -eq $oldBuild.Original) "Old $($oldBuild.Tag) original reconstruction"
+                if ($oldVerify) { Assert ($plan.Output[$oldVerify.o + 3] -eq 0xAC) "Old $($oldBuild.Tag) startup branch corrected" }
+                Assert ($plan.Output[$oldReferenceOffset] -eq $reference) "Old $($oldBuild.Tag) reference selection"
             }
         }
     }
@@ -194,7 +221,7 @@ try {
     Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Original) 'Native ABI rejection leaves game DLL unchanged'
     Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Native ABI rejection leaves worker unchanged'
     [IO.File]::WriteAllBytes($nativePath, $nativeBytes)
-    $originalWorkerBytes = [IO.File]::ReadAllBytes($workerPath)
+    $originalWorkerBytes = if (Test-Path -LiteralPath $pristineWorker) { [IO.File]::ReadAllBytes($pristineWorker) } else { [IO.File]::ReadAllBytes($workerPath) }
     [IO.File]::WriteAllText($workerPath, 'unknown worker')
     Assert-Throws { Get-RuntimePlan $game } 'Unknown worker preserved'
     Assert ([IO.File]::ReadAllText($workerPath) -eq 'unknown worker') 'Worker validation has no side effects'

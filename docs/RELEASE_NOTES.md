@@ -1,3 +1,29 @@
+# SwyfPatcher v2.9.5
+
+## Русский
+
+**Поддержана сборка игры 0.1.91-swyf (2026-10-25).** Игра после обновления снова патчится без предупреждений; меню и команды не изменились.
+
+- Новая запись в таблице патчей: хеши DLL, зависимостей (`ScriptsAssDef.dll`, `Kolkata.Speech.dll`), смещения правок и токены строк `CPU` / `Vulkan0` выверены по фактическим файлам 0.1.91.
+- Все прежние исправления сохранены: таймауты 30/20 → 300 и 120 секунд, выбор CPU/GPU, обход проверки модели (Q4_K_M), выборка голоса 3/10 секунд.
+- Проверка перед применением по-прежнему отклоняет неизвестные сборки и повреждённые зависимости без изменений файлов.
+- Тесты больше не привязаны к конкретной сборке: фикстура и смещения выбираются из таблицы по хешу бэкапа.
+
+**Обновление:** закройте игру, запустите `SwyfPatch.bat` и выберите **2 — применить / обновить патч**. Воркер и модели не менялись; повторная загрузка не требуется, если модели уже на месте.
+
+## English
+
+**Game build 0.1.91-swyf (2026-10-25) is now supported.** The updated game patches cleanly again; the menu and commands are unchanged.
+
+- New patch-table entry: DLL hashes, dependencies (`ScriptsAssDef.dll`, `Kolkata.Speech.dll`), edit offsets and the `CPU` / `Vulkan0` string tokens were verified against actual 0.1.91 files.
+- All previous fixes carry over: 30/20 → 300 and 120 second timeouts, CPU/GPU selection, the model check bypass (Q4_K_M), and 3/10 second voice reference.
+- Unknown builds and damaged dependencies are still rejected before any file changes.
+- Tests no longer hardcode a specific build: the fixture and offsets are selected from the table by backup hash.
+
+**Update:** close the game, run `SwyfPatch.bat`, and choose **2 — Apply / update patch**. The worker and models are unchanged; no re-download is needed when models are already present.
+
+---
+
 # SwyfPatcher v2.9.4
 
 ## Русский

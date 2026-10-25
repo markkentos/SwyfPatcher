@@ -3,7 +3,7 @@
 # Local 2.9 repair: valid VerifyAsync branch, original voice reference, safe menu and logs.
 # Dot-sourcing loads functions for tests; only direct execution enters the UI.
 $ErrorActionPreference = 'Stop'
-$Version = '2.9.4'
+$Version = '2.9.5'
 $GameName = 'Scam With Your Friends'
 $PatcherRoot = Split-Path -Parent $PSScriptRoot
 $SessionLog = $null

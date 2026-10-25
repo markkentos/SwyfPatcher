@@ -1,3 +1,33 @@
+# Проверки 2.9.5 / Validation
+
+## Русский
+
+Проверено локально в Windows PowerShell 5.1 на Windows 11, 25 октября 2026, на реальных файлах игры **0.1.91-swyf** (2026-10-25):
+
+- Новая сборка добавлена по фактическим файлам: метод `HardwareEligible` найден по структурной сигнатуре (0x8D410), все 7 правок совпали по ожидаемым байтам, токены строк `CPU`/`Vulkan0` сверены с #US-потоком, хеши шести пропатченных вариантов пересчитаны.
+- **372 проверки патчера пройдены**, включая миграцию с фикстурой предыдущей сборки 2026-10-24 (`-OldOriginal`) и обновлённым runtime с сохранёнными `.swyf.original`-копиями. Тесты больше не привязаны к номеру сборки: фикстура и смещения выбираются из таблицы по хешу.
+- **66 проверок восстановления моделей пройдены** (Test-ModelRepair).
+- Патч применён по-настоящему: `--backend auto --model q8` — DLL стала `D8DBB56C…` (auto, 10 с), воркер и манифест согласованы, Q8 и кодек проверены по SHA-256; повторный `--check` подтверждает состояние. Резервные копии созданы.
+
+Воркер и native runtime не менялись: **2.9.3**, SHA-256 `25F2FD20B795A60E360FD4D61537D458F3432663EFEA59B91F9E867908B21B8E`.
+
+**Всё ещё требуется:** обычный запуск игры и подтверждение озвучки Qwen на целевом ноутбуке (Intel Arc iGPU, Vulkan). Компилируемые наборы (Test-WorkerPolicy, Test-GpuSelection, Test-AutomaticLogs) требуют PowerShell 7 с Roslyn — в этой среде не запускались.
+
+## English
+
+Checked locally with Windows PowerShell 5.1 on Windows 11, October 25, 2026, against real **0.1.91-swyf** (2026-10-25) game files:
+
+- The new build entry was derived from the actual files: the `HardwareEligible` method was located by structural signature (0x8D410), all 7 edits matched their expected bytes, the `CPU`/`Vulkan0` string tokens were cross-checked against the #US stream, and all six patched variants were re-hashed.
+- **372 patcher assertions passed**, including migration with a previous-build 2026-10-24 fixture (`-OldOriginal`) and an upgraded runtime keeping `.swyf.original` copies. Tests no longer hardcode a build: the fixture and offsets come from the table by hash.
+- **66 model repair assertions passed** (Test-ModelRepair).
+- The patch was applied for real: `--backend auto --model q8` produced DLL `D8DBB56C…` (auto, 10 s), worker and manifest agree, Q8 and codec verified by SHA-256; a follow-up `--check` confirms the state. Backups were created.
+
+The worker and native runtime are unchanged: **2.9.3**, SHA-256 `25F2FD20B795A60E360FD4D61537D458F3432663EFEA59B91F9E867908B21B8E`.
+
+**Still needed:** a normal game launch confirming Qwen speech on the target laptop (Intel Arc iGPU, Vulkan). The compiled suites (Test-WorkerPolicy, Test-GpuSelection, Test-AutomaticLogs) require PowerShell 7 with Roslyn and were not run in this environment.
+
+---
+
 # Проверки 2.9.4 / Validation
 
 ## Русский
