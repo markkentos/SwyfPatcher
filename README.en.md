@@ -1,4 +1,4 @@
-# SwyfPatcher 2.9.2
+# SwyfPatcher 2.9.4
 
 [![Русский](https://img.shields.io/badge/Русский-переключить-555?style=for-the-badge)](README.md)
 [![English](https://img.shields.io/badge/English-selected-2563eb?style=for-the-badge)](README.en.md)
@@ -13,7 +13,7 @@ An unofficial patcher for local **Qwen3 TTS** speech in **Scam With Your Friends
 2. Close the game, run `SwyfPatch.bat`, and choose **2 — Apply / update patch**. If the game is not found, drag its folder onto the BAT.
 3. Close the patcher and start the game **normally through Steam or its EXE**. Logs are saved automatically.
 
-Requires Windows 10/11 x64 and a supported game build. Checked against **0.1.89-swyf** files; unknown builds are left untouched. Let the game download its models first if they are missing. After a game update, check compatibility again with option 1.
+Requires Windows 10/11 x64 and a supported game build. Checked against **0.1.89-swyf** files; unknown builds are left untouched. Applying the patch checks the active model and codec, restores them from a verified cache or downloads replacements. Internet is needed only for missing files (Q8 + codec: about 1.3 GB). After a game update, check compatibility again with option 1.
 
 ## Menu
 
@@ -29,9 +29,11 @@ Requires Windows 10/11 x64 and a supported game build. Checked against **0.1.89-
 | 8 | Русский / English |
 | 0 | Exit |
 
-Applying the patch preserves your model and CPU/GPU selection. Switching models preserves CPU/GPU, and vice versa. The interface remembers your language.
+Applying the patch preserves a healthy model and your CPU/GPU selection. For a damaged model it uses the remembered choice; if the choice cannot be recovered, it restores Q8 and tells you. Switching models preserves CPU/GPU, and vice versa. GPU mode prefers a discrete graphics card and logs its name. The interface remembers your language.
 
 **Q8** is a good starting point for checking speech. **Q4** uses less memory; its Vulkan compatibility mode may be slower. The fix for distorted Q4 audio on NVIDIA still needs Windows testing.
+
+Corrupt originals are saved beside the models with a `.swyf-before-repair-…` suffix. Downloads must match the expected size and SHA-256 before installation; failures stop the patch. No extra menu options.
 
 ## Find logs
 

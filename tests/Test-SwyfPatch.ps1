@@ -21,6 +21,17 @@ function Make-Context([byte[]]$bytes, $build) {
     return [pscustomobject]@{ Current = $bytes; CurHash = (Sha256Hex $bytes); Build = $build; Already = $false; CurVariant = ''; Legacy = $false }
 }
 try {
+    $script:testProfile = Join-Path $testRoot 'profile'
+    function Get-ProfileDir { return $script:testProfile }
+    $cache = Join-Path $testProfile ('qwen3-tts/' + $ModelRevision)
+    New-Item -ItemType Directory -Path $cache -Force | Out-Null
+    $realSpecs = $ModelSpecs
+    $script:ModelSpecs = @{}
+    foreach ($kind in @('q8', 'q4', 'codec')) {
+        $bytes = [Text.Encoding]::UTF8.GetBytes(("fixture-$kind" + $(if ($kind -eq 'q8') { '-original' })))
+        $script:ModelSpecs[$kind] = @{ Name = $realSpecs[$kind].Name; Bytes = $bytes.Length; Hash = (Sha256Hex $bytes) }
+        [IO.File]::WriteAllBytes((Join-Path $cache $ModelSpecs[$kind].Name), $bytes)
+    }
     $managedSource = Join-Path $GameRoot ($GameName + '_Data/Managed')
     $original = [IO.File]::ReadAllBytes((Join-Path $managedSource 'Assembly-CSharp.dll.swyf.original'))
     $build = $Builds[0]
@@ -297,17 +308,6 @@ try {
     }
 
     # Exercise model transactions with small deterministic files, never with user models.
-    $script:testProfile = Join-Path $testRoot 'profile'
-    function Get-ProfileDir { return $script:testProfile }
-    $cache = Join-Path $testProfile ('qwen3-tts/' + $ModelRevision)
-    New-Item -ItemType Directory -Path $cache -Force | Out-Null
-    $realSpecs = $ModelSpecs
-    $script:ModelSpecs = @{}
-    foreach ($kind in @('q8', 'q4', 'codec')) {
-        $bytes = [Text.Encoding]::UTF8.GetBytes(("fixture-$kind" + $(if ($kind -eq 'q8') { '-original' })))
-        $script:ModelSpecs[$kind] = @{ Name = $realSpecs[$kind].Name; Bytes = $bytes.Length; Hash = (Sha256Hex $bytes) }
-        [IO.File]::WriteAllBytes((Join-Path $cache $ModelSpecs[$kind].Name), $bytes)
-    }
     $active = Join-Path $cache $ModelSpecs.q8.Name
     Complete-ModelSwitch (Prepare-ModelSwitch 'q4')
     Assert (Test-ModelFile $active $ModelSpecs.q4) 'Verified Q4 activated'
@@ -325,6 +325,52 @@ try {
     Assert (@(Get-ChildItem -LiteralPath $cache -Filter '*.tmp').Count -eq 0) 'Incomplete download temporary files cleaned'
     Write-Host 'PASS: model activation, verified Q8 backup and failed-download preservation.'
 
+    # Exercise automatic repair through the real menu action, not just the model helpers.
+    $codecPath = Join-Path $cache $ModelSpecs.codec.Name
+    $originalQ8Path = Join-Path $cache 'qwen-talker-0.6b-base-Q8_0.original.gguf'
+    Remove-Item -LiteralPath $originalQ8Path
+    [IO.File]::WriteAllBytes($active, (New-Object byte[] 17757))
+    [IO.File]::WriteAllBytes($codecPath, (New-Object byte[] 17770))
+    $badActiveHash = Get-ModelHash $active; $badCodecHash = Get-ModelHash $codecPath
+    $beforeDll = Get-ModelHash $dll; $beforeWorker = Get-ModelHash $workerPath; $beforeManifest = Get-ModelHash $manifestPath
+    Assert-Throws { Invoke-MenuAction $game '2' } 'Apply aborts before game changes when automatic model download fails'
+    Assert ((Get-ModelHash $dll) -eq $beforeDll -and (Get-ModelHash $workerPath) -eq $beforeWorker -and (Get-ModelHash $manifestPath) -eq $beforeManifest) 'Download failure leaves DLL, worker and manifest unchanged'
+    Assert ((Get-ModelHash $active) -eq $badActiveHash -and (Get-ModelHash $codecPath) -eq $badCodecHash) 'Download failure leaves both live model files unchanged'
+    $script:repairDownloads = 0
+    function Invoke-WebRequest {
+        param($Uri, $OutFile, [switch]$UseBasicParsing, $TimeoutSec)
+        $script:repairDownloads++
+        $kind = @('q8', 'q4', 'codec') | Where-Object { $Uri.EndsWith('/' + $ModelSpecs[$_].Name) } | Select-Object -First 1
+        if (-not $kind) { throw 'Unexpected download URL' }
+        $text = "fixture-$kind" + $(if ($kind -eq 'q8') { '-original' })
+        [IO.File]::WriteAllText($OutFile, $text)
+    }
+    $realModelInstall = ${function:Install-ModelOperation}
+    try {
+        function Install-ModelOperation($operation) {
+            if ($operation.Path -eq $active) { throw 'Simulated model install failure after codec replacement' }
+            & $realModelInstall $operation
+        }
+        Assert-Throws { Invoke-MenuAction $game '2' } 'Model install failure aborts the full patch transaction'
+        Assert ((Get-ModelHash $dll) -eq $beforeDll -and (Get-ModelHash $workerPath) -eq $beforeWorker -and (Get-ModelHash $manifestPath) -eq $beforeManifest) 'Model commit failure rolls back DLL, worker and manifest'
+        Assert ((Get-ModelHash $active) -eq $badActiveHash -and (Get-ModelHash $codecPath) -eq $badCodecHash) 'Model commit failure rolls back repaired codec too'
+    } finally { Set-Item Function:Install-ModelOperation $realModelInstall }
+    $script:repairDownloads = 0
+    Invoke-MenuAction $game '2'
+    Assert ($script:repairDownloads -eq 2) 'Apply automatically downloads both corrupt model files'
+    Assert ((Test-ModelFile $active $ModelSpecs.q8) -and (Test-ModelFile $codecPath $ModelSpecs.codec)) 'Apply installs verified talker and codec'
+    Assert ((Get-Context $game).Already) 'Apply also installs game patch'
+    Assert-AllRuntimeChecksums 'Automatic model repair'
+    $backups = @(Get-ChildItem -LiteralPath $cache -Filter '*.swyf-before-repair-*' -File)
+    Assert (@($backups | Where-Object { (Get-ModelHash $_.FullName) -eq $badActiveHash }).Count -eq 1) 'Broken talker preserved after successful apply'
+    Assert (@($backups | Where-Object { (Get-ModelHash $_.FullName) -eq $badCodecHash }).Count -eq 1) 'Broken codec preserved after successful apply'
+    Invoke-MenuAction $game '2'
+    Assert ($script:repairDownloads -eq 2) 'Reapplying healthy patch does not redownload models'
+    Assert (@(Get-ChildItem -LiteralPath $cache -Force | Where-Object { $_.Name -like '*.tmp' }).Count -eq 0) 'No staging folders left after apply success/failure'
+    Invoke-Restore (Get-Context $game)
+    Write-Host 'PASS: automatic model repair via menu option 2 and full transaction rollback.'
+
+
     $script:PatcherRoot = Join-Path $testRoot 'patcher'
     $logFolder = New-DiagnosticFolder 'test'
     [IO.File]::WriteAllText((Join-Path $logFolder 'Player.log'), "[SpeechRequest] provider=qwen stage=first_audio`n[SpeechRequest] provider=qwen stage=completed succeeded=True firstAudio=True cancelled=False`n[SpeechRequest] provider=qwen stage=completed succeeded=False firstAudio=True cancelled=True`n[Speech] No audio progress.`nException=none`nInvalidOperationException: current failure`n")
@@ -332,12 +378,14 @@ try {
         [IO.File]::WriteAllText((Join-Path $logFolder $name), "NullReferenceException: old startup crash`n[SpeechRequest] provider=qwen stage=completed succeeded=False cancelled=False`n")
     }
     New-Item -ItemType Directory -Path (Join-Path $logFolder 'qwen-worker') | Out-Null
-    [IO.File]::WriteAllText((Join-Path $logFolder 'qwen-worker/qwen-current.log'), "LOAD backend=Vulkan0 q4GpuCompatibility=True`nPROFILE GGML_VK_DISABLE_F16=1`nCOMPLETE request=1`n")
+    [IO.File]::WriteAllText((Join-Path $logFolder 'qwen-worker/qwen-current.log'), "LOAD requestedBackend=Vulkan0 q4GpuCompatibility=True`nPROFILE GGML_VK_DISABLE_F16=1`nGPU_CANDIDATE backend=Vulkan0 type=integrated name=Intel Iris Xe`nGPU_SELECTED backend=Vulkan1 type=discrete name=NVIDIA RTX 3050 Laptop`n[Perf] Total 14709.6 ms (110 frames, audio 8.80 s, RTF 1.672)`nCOMPLETE request=1`n")
     Write-DiagnosticReport $game $logFolder
     Complete-Diagnostics $logFolder
     Assert (Test-Path -LiteralPath ($logFolder + '.zip')) 'Diagnostic ZIP created'
     $summary = Get-Content -LiteralPath (Join-Path $logFolder 'speech-summary.txt') -Raw
     Assert ($summary -match 'CURRENT QWEN WORKER' -and $summary -match 'q4GpuCompatibility=True') 'Current native worker profile included in summary'
+    Assert ($summary -match 'GPU_SELECTED backend=Vulkan1 type=discrete name=NVIDIA RTX 3050 Laptop') 'Summary includes actual selected synthesis device'
+    Assert ($summary -match 'GPU_CANDIDATE backend=Vulkan0 type=integrated' -and $summary -match 'RTF 1.672') 'Summary retains integrated adapter and realtime performance evidence'
     Assert ($summary -match 'No audio progress') 'Speech summary captures stalled audio'
     Assert ($summary -match 'succeeded=1; cancelled=1; failed=0; first_audio=1') 'Summary counts only current Qwen requests, separates cancellation'
     Assert ($summary -notmatch 'NullReferenceException|old startup crash|Exception=none') 'Summary excludes old crashes and exception=none noise'

@@ -24,6 +24,26 @@ SwyfPatch.bat --restore "D:\Games\Scam With Your Friends"
 
 `--launch` still starts an isolated test with a dedicated `Player.log` and collects a ZIP on exit. Only this optional mode requires keeping the patcher open. Normal play through Steam followed by option 7 is sufficient for ordinary reports.
 
+## Проверка и восстановление моделей / Model verification and repair
+
+Любое применение патча, включая смену CPU/GPU или Q4/Q8, сначала проверяет активный talker и codec. Неиспользуемые копии других моделей не перекачиваются. Исправная активная модель определяется по SHA-256, а не имени файла: Q4 также находится под именем Q8. При повреждении используется `swyf-model-choice.txt`; для старого патчера без этого файла полный размер Q4 помогает восстановить выбор. Иначе выбирается Q8 с предупреждением. Явные `--model q4|q8` имеют приоритет.
+
+Every patch application, including CPU/GPU and model switches, verifies the active talker and codec first. Unused model copies are not redownloaded. A healthy active model is identified by SHA-256, not its filename: Q4 also occupies the Q8 path. For corruption, `swyf-model-choice.txt` preserves the choice; older installs can identify full-size damaged Q4 by size. Otherwise Q8 is selected with a warning. Explicit `--model q4|q8` takes precedence.
+
+Все нужные загрузки и копии из кэша подготавливаются в собственной временной папке рядом с моделями до изменения DLL/runtime. Размер и SHA-256 обязательны для каждого источника, включая зеркала. Затем перепроверяются исходные файлы, выполняются замены с бэкапами. При сбое откатываются собственные замены, конкурентные изменения сохраняются. Повреждённые оригиналы остаются как `.swyf-before-repair-…`. Исправные уходящие Q8/Q4 сохраняются в кэше; временные бэкапы убираются после успешного переключения. `--restore` модели не меняет.
+
+All required downloads and cache copies are staged beside the models before DLL/runtime changes. Every source, including mirrors, must match the exact size and SHA-256. Original files are rechecked before replacement with backups. Failures roll back owned replacements and preserve concurrent changes. Corrupt originals remain as `.swyf-before-repair-…`. Healthy outgoing Q8/Q4 weights are cached; temporary rollback backups are removed after a successful switch. `--restore` leaves models unchanged.
+
+## Выбор GPU / GPU selection
+
+Игровой запрос `Vulkan0` означает режим GPU. Воркер загружает Vulkan-бэкенд, запрашивает устройства у того же реестра GGML, который использует Qwen, и передаёт выбранное имя (`Vulkan0`, `Vulkan1` и т. д.) через `GGML_BACKEND` до `qt_init`. Типы устройств из закреплённого ggml: `GPU=1`, `IGPU=2`. Приоритет: дискретная карта, затем общий объём памяти; равные варианты сохраняют порядок реестра. Название производителя не используется как эвристика. Переключатели Q4 выставляются до загрузки бэкенда.
+
+The game's `Vulkan0` request means GPU mode. The worker loads the Vulkan backend, enumerates the same GGML registry Qwen uses, and sets `GGML_BACKEND` to the selected name before `qt_init`. The pinned GGML device types are `GPU=1` and `IGPU=2`. Selection prefers discrete graphics, then total memory, retaining registry order on ties. It does not guess from vendor names. Q4 flags are set before backend loading.
+
+`GPU_SELECTED` показывает намеренно выбранный адаптер; строка native `Talker backend` подтверждает фактически инициализированный бэкенд. Рендерер Unity может работать на другой карте. `RTF > 1` в `[Perf] Total` означает, что генерация медленнее воспроизведения.
+
+`GPU_SELECTED` identifies the selected adapter; the native `Talker backend` line confirms initialization. Unity's renderer may use a different card. `RTF > 1` in `[Perf] Total` means synthesis is slower than playback.
+
 ## Автоматические логи / Automatic logging
 
 Воркер по умолчанию пишет в `swyf-qwen-logs/session-…` внутри профиля Unity. Один журнал ограничен примерно 8 MiB, WAV — первыми шестью репликами по 30 секунд. Хранятся 10 последних сеансов; активные и посторонние файлы не удаляются. Старые плоские журналы версий 2.9.0/2.9.1 не очищаются автоматически. Игра отдельно ведёт `Player.log` / `Player-prev.log` независимо от запуска воркера.
@@ -46,6 +66,8 @@ Users do not need build tools: the worker is included. Developers need PowerShel
 ```powershell
 pwsh -NoProfile -File worker/Build-Worker.ps1 -ReferenceDirectory "path\to\net472"
 pwsh -NoProfile -File tests/Test-WorkerPolicy.ps1
+pwsh -NoProfile -File tests/Test-GpuSelection.ps1
+pwsh -NoProfile -File tests/Test-ModelRepair.ps1
 pwsh -NoProfile -File tests/Test-AutomaticLogs.ps1
 pwsh -NoProfile -File tests/Test-SwyfPatch.ps1 -GameRoot "D:\Games\Scam With Your Friends"
 ```

@@ -7,6 +7,7 @@ Add-Type -Path (Join-Path $PSHOME 'Microsoft.CodeAnalysis.CSharp.dll')
 $trees = [Microsoft.CodeAnalysis.SyntaxTree[]]@(
     [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Worker.cs'))),
     [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'AutomaticLogs.cs'))),
+    [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'GpuSelection.cs'))),
     [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Qwen3Native.cs')))
 )
 $refs = [Microsoft.CodeAnalysis.MetadataReference[]]@('mscorlib.dll','System.dll','System.Core.dll' | ForEach-Object {

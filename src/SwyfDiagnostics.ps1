@@ -36,7 +36,7 @@ function Write-DiagnosticReport([string]$game, [string]$directory) {
     $report = New-Object 'System.Collections.Generic.List[string]'
     [void]$report.Add("SwyfPatcher $Version; time=$(Get-Date -Format o)")
     [void]$report.Add("Game: $game")
-    [void]$report.Add("Q4 GPU profile: applied by the patched worker only for the verified Q4 hash + Vulkan0. GGUF weights stay unchanged; see qwen-worker logs for actual activation/device.")
+    [void]$report.Add("Q4 GPU profile: applied by the patched worker only for the verified Q4 hash + Vulkan GPU. GGUF weights stay unchanged; see qwen-worker logs for actual activation/device.")
     try {
         $ctx = Get-Context $game
         [void]$report.Add("Build table: $($ctx.Build.Tag); patched=$($ctx.Already); backend=$($ctx.CurVariant); reference=$($ctx.ReferenceSeconds)s; legacy=$($ctx.Legacy)")
@@ -80,7 +80,7 @@ function Write-DiagnosticReport([string]$game, [string]$directory) {
             [void]$report.Add("RUNTIME $($entry.path); manifestMatch=$($hash -eq $entry.sha256); knownLocalWorker=$knownWorker; SHA256=$hash")
         }
     } catch { [void]$report.Add('Runtime check: ' + $_.Exception.Message) }
-    [void]$report.Add('Vulkan0 is the worker backend; the Unity renderer device does not prove the worker device.')
+    [void]$report.Add('GPU mode prefers a discrete Vulkan adapter using the worker GGML registry. See GPU_SELECTED and Talker backend in worker logs; the Unity renderer is independent.')
     [void]$report.Add('The patched worker writes Qwen/GGML callbacks to its own log. Some direct native stderr output is still absent from these logs.')
     [IO.File]::WriteAllLines((Join-Path $directory 'system-and-dll.txt'), $report, (New-Object Text.UTF8Encoding $true))
 }
@@ -149,7 +149,7 @@ function Write-SpeechSummary([string]$directory) {
         foreach ($workerLog in @(Get-ChildItem -LiteralPath $workerDirectory -Filter '*.log' -File)) {
             [void]$lines.Add("FILE: qwen-worker/$($workerLog.Name)")
             foreach ($line in Get-Content -LiteralPath $workerLog.FullName -Encoding UTF8) {
-                if ($line -match 'WORKER |LOAD |PROFILE |INIT |backend:|FIRST_AUDIO|COMPLETE|ERROR|NONFINITE|CAPTURE|WORKER_EXIT') { [void]$lines.Add($line) }
+                if ($line -match 'WORKER |LOAD |PROFILE |INIT |GPU_CANDIDATE|GPU_SELECTED|GPU_WARNING|BACKEND_SELECTED|ggml_vulkan:|backend:|\[Perf\] Total|FIRST_AUDIO|COMPLETE|ERROR|NONFINITE|CAPTURE|WORKER_EXIT') { [void]$lines.Add($line) }
             }
         }
     }
@@ -159,7 +159,7 @@ function Write-SpeechSummary([string]$directory) {
         foreach ($file in @(Get-ChildItem -LiteralPath $recent -Filter '*.log' -File -Recurse)) {
             [void]$lines.Add("FILE: $($file.Directory.Name)/$($file.Name)")
             foreach ($line in Get-Content -LiteralPath $file.FullName -Encoding UTF8) {
-                if ($line -match 'WORKER |LOAD |PROFILE |INIT |backend:|FIRST_AUDIO|COMPLETE|ERROR|NONFINITE|CAPTURE|WORKER_EXIT') { [void]$lines.Add($line) }
+                if ($line -match 'WORKER |LOAD |PROFILE |INIT |GPU_CANDIDATE|GPU_SELECTED|GPU_WARNING|BACKEND_SELECTED|ggml_vulkan:|backend:|\[Perf\] Total|FIRST_AUDIO|COMPLETE|ERROR|NONFINITE|CAPTURE|WORKER_EXIT') { [void]$lines.Add($line) }
             }
         }
     }

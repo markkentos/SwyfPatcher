@@ -12,13 +12,13 @@ using Qwen3TTS;
 
 [assembly: System.Reflection.AssemblyTitle("SwyfPatcher Qwen TTS Worker")]
 [assembly: System.Reflection.AssemblyProduct("SwyfPatcher")]
-[assembly: System.Reflection.AssemblyVersion("2.9.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("2.9.2.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("2.9.2")]
+[assembly: System.Reflection.AssemblyVersion("2.9.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2.9.3.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2.9.3")]
 
 internal static class Worker
 {
-    internal const string Build = "2.9.2";
+    internal const string Build = "2.9.3";
     internal const string Q4Hash = "4B468EC7B1F62B90EF4CA316C0AA57DEADFD54B2CF9651703EA753CEDAF04226";
     private static readonly object logLock = new object();
     private static StreamWriter logFile;
@@ -59,7 +59,7 @@ internal static class Worker
     // GGUF bytes and GPU selection are preserved. Flags are private to this process.
     internal static bool UseQ4GpuProfile(string hash, string backend)
     {
-        return backend == "Vulkan0" && String.Equals(hash, Q4Hash, StringComparison.OrdinalIgnoreCase);
+        return GpuSelection.IsVulkan(backend) && String.Equals(hash, Q4Hash, StringComparison.OrdinalIgnoreCase);
     }
     private static void ApplyQ4GpuProfile()
     {
@@ -111,15 +111,22 @@ internal static class Worker
         if (context != IntPtr.Zero || (backend != "CPU" && backend != "Vulkan0")) throw new InvalidDataException("Invalid Qwen load request.");
         string hash = HashFile(model);
         bool safe = UseQ4GpuProfile(hash, backend);
-        Log("LOAD modelSHA256=" + hash + " backend=" + backend + " q4GpuCompatibility=" + safe);
-        SetNativeEnvironment("GGML_BACKEND", backend);
+        Log("LOAD modelSHA256=" + hash + " requestedBackend=" + backend + " q4GpuCompatibility=" + safe);
         if (safe) ApplyQ4GpuProfile();
         // Install both callbacks before loading backends; GGML logs contain actual device selection.
         Native.qt_log_set(nativeLog, IntPtr.Zero);
         ggml_log_set(ggmlLog, IntPtr.Zero);
         string root = Path.GetDirectoryName(typeof(Worker).Assembly.Location);
         Native.ggml_backend_load_all_from_path(Path.Combine(root, "cpu"));
-        if (backend == "Vulkan0") Native.ggml_backend_load_all_from_path(Path.Combine(root, "gpu"));
+        if (backend == "Vulkan0")
+        {
+            Native.ggml_backend_load_all_from_path(Path.Combine(root, "gpu"));
+            // The game's Vulkan0 request means GPU mode, not a reliable physical adapter.
+            // Resolve it using GGML's own device names before qt_init reads the CRT environment.
+            backend = GpuSelection.Detect(Log).Backend;
+        }
+        SetNativeEnvironment("GGML_BACKEND", backend);
+        Log("BACKEND_SELECTED " + backend);
         qt_init_params ip;
         Native.qt_init_default_params(out ip);
         ip.talker_path = model; ip.codec_path = codec;

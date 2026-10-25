@@ -1,3 +1,67 @@
+# SwyfPatcher v2.9.4
+
+## Русский
+
+**Применение патча теперь автоматически восстанавливает повреждённые модели.** Достаточно выбрать обычный пункт **2**; меню осталось прежним.
+
+- Проверяются размер и SHA-256 активной Q4/Q8 и аудиокодека. Исправные файлы сохраняются; для восстановления используется проверенный кэш или загрузка закреплённой версии с Hugging Face / зеркал.
+- Модели скачиваются и при пустом кэше. Больше не требуется сначала загружать их через игру.
+- Выбор Q4/Q8 запоминается. Если повреждённую модель нельзя определить и выбора ещё нет, восстанавливается Q8 с предупреждением. CPU/GPU сохраняется.
+- Обе замены подготавливаются до изменений файлов игры. HTML вместо модели, неверный хеш и оборванная загрузка отклоняются. При ошибке установки выполняется откат собственных изменений.
+- Повреждённые оригиналы сохраняются рядом с моделями. Смена Q4/Q8 сохраняет исправную уходящую модель для переключения обратно без повторной загрузки.
+- Автоматическая проверка также работает при переключении CPU/GPU и Q4/Q8. Пункт 1 остаётся проверкой без загрузок и изменений.
+
+**Обновление:** распакуйте весь архив, закройте игру, запустите BAT и выберите **2 — применить / обновить патч**. При повреждении обеих моделей Q8 потребуется скачать около **1,3 ГБ**. Дождитесь сообщения об успешном применении.
+
+Воркер остаётся от 2.9.3: исправление выбора дискретной GPU сохранено, параметры озвучки не изменены. Его версия в логе — 2.9.3. Windows-игра на Mac не запускалась; восстановление проверено на временных файлах с имитацией загрузок и ошибок.
+
+## English
+
+**Applying the patch now automatically repairs corrupt models.** Use the existing **option 2**; the menu is unchanged.
+
+- Checks the active Q4/Q8 model and codec by size and SHA-256. Healthy files are preserved; repairs reuse verified cached weights or download the pinned version from Hugging Face / mirrors.
+- Empty caches are supported without first downloading models through the game.
+- Remembers Q4/Q8 selection. If a damaged model cannot be identified and no selection is saved, it restores Q8 with a warning. CPU/GPU selection is preserved.
+- Both replacements are prepared before changing game files. HTML responses, incorrect hashes, and interrupted downloads are rejected. Failed installations roll back owned changes.
+- Corrupt originals are kept beside the models. Switching models preserves the healthy outgoing weights for switching back offline.
+- CPU/GPU and Q4/Q8 actions also run the checks. Option 1 remains read-only with no downloads.
+
+**Update:** extract the full archive, close the game, run the BAT, and select **2 — Apply / update patch**. Repairing both Q8 files downloads approximately **1.3 GB**. Wait for the success message.
+
+The worker remains at 2.9.3, retaining discrete GPU selection and unchanged speech settings; its log version is still 2.9.3. The Windows game was not run on macOS. Repair was tested with temporary files and simulated downloads/failures.
+
+---
+
+# SwyfPatcher v2.9.3
+
+## Русский
+
+Исправлен выбор видеокарты для озвучки на ноутбуках с двумя GPU. Раньше режим GPU использовал `Vulkan0`, которым могла оказаться встроенная Intel, даже если сама игра работала на NVIDIA. В полученном отчёте это приводило к генерации звука медленнее его воспроизведения.
+
+- Воркер выбирает дискретный Vulkan-адаптер по данным GGML; номер устройства и порядок в Windows не определяют выбор. При нескольких дискретных картах предпочитается больший общий объём видеопамяти.
+- Если доступна только встроенная графика, она остаётся доступна с предупреждением в логе. При отсутствии Vulkan-устройства возвращается ошибка; скрытого перехода на CPU нет. Принудительный CPU сохраняется.
+- В логи и сводку добавлены список адаптеров, выбранная карта и время генерации относительно длительности звука.
+- Сохраняются автологи, меню из девяти пунктов и текущая модель. Параметры синтеза Q8 не изменены; режим совместимости Q4 применяется и к GPU с ненулевым номером.
+
+**Обновление:** распакуйте архив целиком, закройте игру и выберите **2 — применить / обновить патч**. Для повторного теста оставьте **Q8 + GPU**, запустите игру как обычно и после выхода соберите ZIP пунктом **7**.
+
+Выбор адаптера и протокол проверены локально. Скорость и качество речи на реальной RTX 3050 после изменения ещё требуют теста на Windows.
+
+## English
+
+Fixed speech GPU selection on laptops with two graphics adapters. GPU mode previously used `Vulkan0`, which could be integrated Intel graphics even when the game rendered on NVIDIA. In the supplied report, synthesis was slower than audio playback.
+
+- The worker prefers a discrete Vulkan adapter from GGML's own registry, independently of its index or Windows display order. Among multiple discrete GPUs, it prefers greater total VRAM.
+- Integrated-only graphics remain supported with a log warning. Missing Vulkan hardware produces an error instead of silently switching to CPU. Explicit CPU mode is preserved.
+- Logs and summaries now include available adapters, the selected device, and generation time relative to audio duration.
+- Automatic logs, the nine-option menu, and model selection are preserved. Q8 synthesis settings are unchanged; Q4 compatibility also applies to nonzero Vulkan device indices.
+
+**Update:** extract the complete archive, close the game, and choose **2 — Apply / update patch**. Retest with **Q8 + GPU**, launch normally, then collect a ZIP with option **7** after exiting.
+
+Adapter selection and the protocol were tested locally. Speed and voice quality on an actual RTX 3050 still require Windows testing.
+
+---
+
 # SwyfPatcher v2.9.2
 
 ## Русский

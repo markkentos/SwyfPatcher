@@ -3,7 +3,7 @@
 # Local 2.9 repair: valid VerifyAsync branch, original voice reference, safe menu and logs.
 # Dot-sourcing loads functions for tests; only direct execution enters the UI.
 $ErrorActionPreference = 'Stop'
-$Version = '2.9.2'
+$Version = '2.9.4'
 $GameName = 'Scam With Your Friends'
 $PatcherRoot = Split-Path -Parent $PSScriptRoot
 $SessionLog = $null
@@ -213,24 +213,26 @@ function Invoke-Patch($ctx, [string]$backend, [int]$reference = 0, [string]$mode
     Assert-GameClosed
     $plan = Get-PatchPlan $ctx $backend $reference
     $runtimePlan = Get-RuntimePlan $ctx.Game
-    # Model downloads/validation finish before DLL replacement; dry-run never enters here.
-    $modelPlan = if ($model) { Prepare-ModelSwitch $model } else { $null }
-    Assert-GameClosed
-    $backup = Save-OriginalBackup $ctx $plan.Source
-    Write-Info2 (T 'Патч проверен. Применяю изменения...' 'Patch verified. Applying changes...')
-    Set-RuntimePlan $runtimePlan
+    # Verify/download all required models before changing DLLs. Read-only checks never enter here.
+    $modelPlan = Prepare-ModelSwitch $model
     try {
-        if ($ctx.CurHash -ne $plan.Hash) { ReplaceVerified $ctx.Dll $ctx.Current $plan.Output $plan.Hash }
-        if ($modelPlan) { Complete-ModelSwitch $modelPlan }
-    } catch {
-        # Roll back only our own bytes; never clobber a concurrent change.
-        $failure = $_
-        if ($ctx.CurHash -ne $plan.Hash -and (Get-FileHash -LiteralPath $ctx.Dll).Hash -eq $plan.Hash) {
-            ReplaceVerified $ctx.Dll $plan.Output $ctx.Current $ctx.CurHash
+        Assert-GameClosed
+        $backup = Save-OriginalBackup $ctx $plan.Source
+        Write-Info2 (T 'Патч проверен. Применяю изменения...' 'Patch verified. Applying changes...')
+        Set-RuntimePlan $runtimePlan
+        try {
+            if ($ctx.CurHash -ne $plan.Hash) { ReplaceVerified $ctx.Dll $ctx.Current $plan.Output $plan.Hash }
+            Complete-ModelSwitch $modelPlan
+        } catch {
+            # Roll back only our own bytes; never clobber a concurrent change.
+            $failure = $_
+            if ($ctx.CurHash -ne $plan.Hash -and (Get-FileHash -LiteralPath $ctx.Dll).Hash -eq $plan.Hash) {
+                ReplaceVerified $ctx.Dll $plan.Output $ctx.Current $ctx.CurHash
+            }
+            Undo-RuntimePlan $runtimePlan
+            throw $failure
         }
-        Undo-RuntimePlan $runtimePlan
-        throw $failure
-    }
+    } finally { Clear-ModelPlan $modelPlan }
     try { Set-VoicePreference } catch { Write-Warn2 ((T 'Выберите Qwen в настройках игры; ошибка реестра: ' 'Select Qwen in game settings; registry update failed: ') + $_.Exception.Message) }
     Write-Ok (T "Готово. Обработка: $($plan.Backend), образец: $($plan.Reference) с; SHA256=$($plan.Hash)" "Patched. Backend=$($plan.Backend), reference=$($plan.Reference)s; SHA256=$($plan.Hash)")
     Write-Host (T "Резервная копия: $backup" "Original backup: $backup")

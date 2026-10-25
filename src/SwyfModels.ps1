@@ -8,9 +8,10 @@ $ModelSpecs = @{
 function Get-ProfileDir {
     return Join-Path $env:USERPROFILE ('AppData/LocalLow/Jatater Worldwide/' + $GameName)
 }
-function Get-QwenModelDir {
+function Get-QwenModelDir([switch]$Create) {
     $directory = Join-Path (Get-ProfileDir) ('qwen3-tts/' + $ModelRevision)
-    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { throw "Model cache not found: $directory. Let the game download its models first." }
+    if ($Create) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { throw "Model cache not found: $directory. Apply the patch to download verified models." }
     return $directory
 }
 function Get-ActiveModelKind {
@@ -31,74 +32,162 @@ function Test-ModelFile([string]$path, $spec) {
 function Assert-ModelFile([string]$path, $spec) {
     if (-not (Test-ModelFile $path $spec)) { throw "Missing or invalid model: $path. Expected SHA256 $($spec.Hash). Active model was not replaced." }
 }
+function Get-ModelHash([string]$path) {
+    if (-not (Test-Path -LiteralPath $path)) { return '' }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Expected a model file, found a directory: $path" }
+    return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+}
 function Download-VerifiedModel([string]$destination, $spec) {
+    # Downloads only enter a private staging folder, never the live model path.
+    if (Test-Path -LiteralPath $destination) { throw "Download staging file already exists: $destination" }
     $temporary = $destination + '.download-' + [Guid]::NewGuid().ToString('N') + '.tmp'
     $urls = @(
         "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/$ModelRevision/$($spec.Name)",
         "https://hf-mirror.com/Serveurperso/Qwen3-TTS-GGUF/resolve/$ModelRevision/$($spec.Name)",
         "https://hf.aihoster.ru/Serveurperso/Qwen3-TTS-GGUF/resolve/$ModelRevision/$($spec.Name)"
     )
-    $oldHash = if (Test-Path -LiteralPath $destination) { (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash } else { '' }
+    $oldProgress = $ProgressPreference
     try {
+        $ProgressPreference = 'SilentlyContinue'
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         $valid = $false
         foreach ($url in $urls) {
             try {
                 if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
-                Write-Info2 (T "Загружаю $($spec.Name): $url" "Downloading $($spec.Name) from $url")
-                Invoke-WebRequest -Uri $url -OutFile $temporary -UseBasicParsing -TimeoutSec 1800
+                Write-Info2 (T "Загружаю $($spec.Name) ($($spec.Bytes) байт): $url" "Downloading $($spec.Name) ($($spec.Bytes) bytes): $url")
+                Invoke-WebRequest -Uri $url -OutFile $temporary -UseBasicParsing -TimeoutSec 1800 | Out-Null
                 Assert-ModelFile $temporary $spec
                 $valid = $true; break
             } catch { Write-Warn2 $_.Exception.Message }
         }
-        if (-not $valid) { throw 'All downloads failed verification. Active model is unchanged.' }
-        if ($oldHash) {
-            if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ne $oldHash) { throw 'Model cache changed during download.' }
-            $backup = $destination + '.before-download-' + [Guid]::NewGuid().ToString('N')
-            [IO.File]::Replace($temporary, $destination, $backup)
-        } else {
-            # Move without overwrite: another downloader must not be clobbered.
-            [IO.File]::Move($temporary, $destination)
-        }
-        Assert-ModelFile $destination $spec
-    } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
+        if (-not $valid) { throw (T 'Не удалось скачать проверенную модель. Файлы игры и активные модели не изменены; попробуйте применить патч позже.' 'Could not download a verified model. Game files and active models are unchanged; retry applying the patch later.') }
+        [IO.File]::Move($temporary, $destination)
+    } finally {
+        $ProgressPreference = $oldProgress
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
 }
-function Prepare-ModelSwitch([string]$kind) {
-    if ($kind -notin @('q8', 'q4')) { throw 'Model must be q8 or q4.' }
-    if ($kind -eq 'q4') { Write-Info2 (T 'Q4 сохранит 4-битные веса. На Vulkan включится режим совместимости.' 'Q4 keeps its 4-bit weights. Vulkan will use the compatibility path.') }
-    $directory = Get-QwenModelDir
+function Clear-ModelPlan($plan) {
+    if ($plan -and $plan.Stage -and (Test-Path -LiteralPath $plan.Stage)) {
+        try { Remove-Item -LiteralPath $plan.Stage -Recurse -Force }
+        catch { Write-Warn2 (T "Не удалось удалить временную папку: $($plan.Stage)" "Could not remove temporary folder: $($plan.Stage)") }
+    }
+}
+function Add-ModelOperation($plan, [string]$path, $spec, [string]$source = '', [bool]$keepBackup = $true) {
+    $oldHash = Get-ModelHash $path
+    if (Test-ModelFile $path $spec) { return }
+    if (-not $plan.Stage) {
+        $plan.Stage = Join-Path $plan.Directory ('.swyf-model-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+        New-Item -ItemType Directory -Path $plan.Stage | Out-Null
+    }
+    $temporary = Join-Path $plan.Stage ([Guid]::NewGuid().ToString('N') + '.gguf')
+    if ($source) {
+        [IO.File]::Copy($source, $temporary, $false)
+        Assert-ModelFile $temporary $spec
+    } else { Download-VerifiedModel $temporary $spec }
+    [void]$plan.Operations.Add([pscustomobject]@{
+        Path = $path; Spec = $spec; CurrentHash = $oldHash; Temporary = $temporary
+        Backup = $path + '.swyf-before-repair-' + [Guid]::NewGuid().ToString('N')
+        KeepBackup = $keepBackup; Applied = $false
+    })
+}
+function Prepare-ModelSwitch([string]$kind = '') {
+    if ($kind -and $kind -notin @('q8', 'q4')) { throw 'Model must be q8 or q4.' }
+    $directory = Get-QwenModelDir -Create
     $active = Join-Path $directory $ModelSpecs.q8.Name
     $codec = Join-Path $directory $ModelSpecs.codec.Name
-    Assert-ModelFile $codec $ModelSpecs.codec
-    $spec = $ModelSpecs[$kind]
-    $original = Join-Path $directory 'qwen-talker-0.6b-base-Q8_0.original.gguf'
-    if (Test-ModelFile $active $spec) { return [pscustomobject]@{ Unchanged = $true; Kind = $kind } }
-    if ($kind -eq 'q4') {
-        if (-not (Test-ModelFile $original $ModelSpecs.q8)) {
-            if (-not (Test-ModelFile $active $ModelSpecs.q8)) { throw 'A verified original Q8 model is required before switching to Q4. Choose Q8 first.' }
-            if (Test-Path -LiteralPath $original) { throw "Invalid existing Q8 backup: $original. Preserve/move it and retry; it will not be overwritten." }
-            [IO.File]::Copy($active, $original, $false)
-            Assert-ModelFile $original $ModelSpecs.q8
+    Write-Info2 (T 'Проверяю SHA-256 активной модели и аудиокодека...' 'Checking active model and codec SHA-256...')
+    $activeHash = Get-ModelHash $active
+    $codecHash = Get-ModelHash $codec
+    $currentKind = ''
+    foreach ($candidate in @('q8', 'q4')) {
+        if ($activeHash -eq $ModelSpecs[$candidate].Hash -and (Get-Item -LiteralPath $active).Length -eq $ModelSpecs[$candidate].Bytes) { $currentKind = $candidate; break }
+    }
+    $choicePath = Join-Path $directory 'swyf-model-choice.txt'
+    if (-not $kind) {
+        $kind = $currentKind
+        if (-not $kind -and (Test-Path -LiteralPath $choicePath -PathType Leaf) -and (Get-Item -LiteralPath $choicePath).Length -le 64) {
+            $saved = [IO.File]::ReadAllText($choicePath).Trim()
+            if ($saved -in @('q4', 'q8')) { $kind = $saved }
         }
-        $source = Join-Path $directory $spec.Name
-    } else { $source = $original }
-    if (-not (Test-ModelFile $source $spec)) { Download-VerifiedModel $source $spec }
-    Assert-ModelFile $source $spec
-    $currentHash = if (Test-Path -LiteralPath $active) { (Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash } else { '' }
-    return [pscustomobject]@{ Unchanged = $false; Kind = $kind; Source = $source; Active = $active; CurrentHash = $currentHash; Spec = $spec }
+        # Older patchers did not save a selection. A full-size damaged Q4 is identifiable by size.
+        if (-not $kind -and (Test-Path -LiteralPath $active -PathType Leaf) -and (Get-Item -LiteralPath $active).Length -eq $ModelSpecs.q4.Bytes) { $kind = 'q4' }
+        if (-not $kind) {
+            $kind = 'q8'
+            Write-Warn2 (T 'Модель отсутствует или повреждена, прежний выбор неизвестен. Восстановлю стандартную Q8.' 'Model missing or corrupt; previous selection is unknown. Restoring standard Q8.')
+        }
+    }
+    $plan = [pscustomobject]@{
+        Kind = $kind; Directory = $directory; Stage = ''; ChoicePath = $choicePath
+        Operations = (New-Object 'System.Collections.Generic.List[object]')
+        Checks = @([pscustomobject]@{ Path = $active; Hash = $activeHash }, [pscustomobject]@{ Path = $codec; Hash = $codecHash })
+    }
+    try {
+        # Stage every required replacement before committing any live file or DLL.
+        if (-not (Test-ModelFile $codec $ModelSpecs.codec)) {
+            Write-Warn2 (T 'Аудиокодек отсутствует или повреждён. Загружу проверенную копию.' 'Codec missing or corrupt. Downloading a verified copy.')
+            Add-ModelOperation $plan $codec $ModelSpecs.codec
+        }
+        $cache = @{ q8 = (Join-Path $directory 'qwen-talker-0.6b-base-Q8_0.original.gguf'); q4 = (Join-Path $directory $ModelSpecs.q4.Name) }
+        if ($currentKind -ne $kind) {
+            # Preserve a healthy outgoing model for offline switching back.
+            if ($currentKind) { Add-ModelOperation $plan $cache[$currentKind] $ModelSpecs[$currentKind] $active }
+            $source = if (Test-ModelFile $cache[$kind] $ModelSpecs[$kind]) { $cache[$kind] } else { '' }
+            Write-Info2 (T "Подготавливаю проверенную $kind..." "Preparing verified $kind...")
+            Add-ModelOperation $plan $active $ModelSpecs[$kind] $source ([string]::IsNullOrEmpty($currentKind))
+        }
+        return $plan
+    } catch { Clear-ModelPlan $plan; throw }
+}
+function Install-ModelOperation($operation) {
+    if ((Get-ModelHash $operation.Path) -ne $operation.CurrentHash) { throw "Model changed during operation: $($operation.Path)" }
+    if ($operation.CurrentHash) { [IO.File]::Replace($operation.Temporary, $operation.Path, $operation.Backup) }
+    else { [IO.File]::Move($operation.Temporary, $operation.Path) }
+    $operation.Applied = $true
+    Assert-ModelFile $operation.Path $operation.Spec
+}
+function Undo-ModelOperations($plan) {
+    $errors = New-Object 'System.Collections.Generic.List[string]'
+    for ($i = $plan.Operations.Count - 1; $i -ge 0; $i--) {
+        $operation = $plan.Operations[$i]
+        if (-not $operation.Applied) { continue }
+        try {
+            if ((Get-ModelHash $operation.Path) -ne $operation.Spec.Hash) { throw "Model changed externally; rollback preserved it. Original backup: $($operation.Backup)" }
+            if ($operation.CurrentHash) {
+                if ((Get-ModelHash $operation.Backup) -ne $operation.CurrentHash) { throw "Model rollback backup mismatch: $($operation.Backup)" }
+                [IO.File]::Replace($operation.Backup, $operation.Path, [NullString]::Value)
+            } else { Remove-Item -LiteralPath $operation.Path }
+            $operation.Applied = $false
+        } catch { [void]$errors.Add($_.Exception.Message) }
+    }
+    if ($errors.Count) { throw ($errors -join '; ') }
 }
 function Complete-ModelSwitch($plan) {
-    if ($plan.Unchanged) { Write-Ok (T "Проверенная модель $($plan.Kind) уже включена." "Verified model $($plan.Kind) is already active."); return }
-    Assert-GameClosed
-    $temporary = $plan.Active + '.swyf-model-' + [Guid]::NewGuid().ToString('N') + '.tmp'
     try {
-        [IO.File]::Copy($plan.Source, $temporary, $false)
-        Assert-ModelFile $temporary $plan.Spec
-        if ($plan.CurrentHash) {
-            if ((Get-FileHash -LiteralPath $plan.Active -Algorithm SHA256).Hash -ne $plan.CurrentHash) { throw 'Active model changed during operation. No model replacement.' }
-            [IO.File]::Replace($temporary, $plan.Active, [NullString]::Value)
-        } else { [IO.File]::Move($temporary, $plan.Active) }
-        Assert-ModelFile $plan.Active $plan.Spec
-        Write-Ok (T "Проверенная модель $($plan.Kind) включена." "Verified $($plan.Kind) model activated.")
-    } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
+        Assert-GameClosed
+        foreach ($check in $plan.Checks) {
+            if ((Get-ModelHash $check.Path) -ne $check.Hash) { throw "Model changed during preparation: $($check.Path)" }
+        }
+        foreach ($operation in $plan.Operations) { Assert-ModelFile $operation.Temporary $operation.Spec }
+        try {
+            foreach ($operation in $plan.Operations) {
+                Assert-GameClosed
+                Install-ModelOperation $operation
+            }
+        } catch {
+            $failure = $_
+            try { Undo-ModelOperations $plan } catch { Write-Warn2 $_.Exception.Message }
+            throw $failure
+        }
+        # Preserve corrupt originals. Healthy outgoing weights already have a verified cache copy.
+        foreach ($operation in $plan.Operations) {
+            if (Test-Path -LiteralPath $operation.Backup) {
+                if ($operation.KeepBackup) { Write-Host (T "Старый файл сохранён: $($operation.Backup)" "Previous file saved: $($operation.Backup)") }
+                else { try { Remove-Item -LiteralPath $operation.Backup } catch { Write-Warn2 $_.Exception.Message } }
+            }
+        }
+        try { [IO.File]::WriteAllText($plan.ChoicePath, $plan.Kind) }
+        catch { Write-Warn2 (T 'Не удалось запомнить модель; проверенные файлы уже установлены.' 'Could not remember selection; verified model files are already installed.') }
+        Write-Ok (T "Модель $($plan.Kind) и аудиокодек проверены и готовы." "Verified $($plan.Kind) model and codec are ready.")
+    } finally { Clear-ModelPlan $plan }
 }
