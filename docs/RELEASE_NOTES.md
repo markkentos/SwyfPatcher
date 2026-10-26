@@ -1,3 +1,27 @@
+# SwyfPatcher v2.9.6
+
+## Русский
+
+**Поддержана сборка игры от 2026-10-26 (buildid 26208975).** Игра снова обновилась — патчер доработан по фактическим файлам; меню и команды не изменились.
+
+- Новая запись в таблице патчей: хеш DLL (`3F51A7F9…`), обновлённые `ScriptsAssDef.dll` / `Kolkata.Speech.dll`, смещения правок (сдвиг −0xC20 относительно 0.1.91) и токены строк `CPU` / `Vulkan0` (`0x7003FC0F` / `0x7003FC17`) выверены по фактическим файлам.
+- Метод HardwareEligible и метод проверки модели побайтово идентичны 0.1.91 (кроме токенов метаданных) — подтверждено сравнением IL с маскированием токенов.
+- Все прежние исправления сохранены: таймауты 30/20 → 300 и 120 секунд, выбор CPU/GPU, обход проверки модели (Q4_K_M), выборка голоса 3/10 секунд.
+
+**Обновление:** закройте игру, запустите `SwyfPatch.bat` и выберите **2 — применить / обновить патч**. Воркер и модели не менялись; повторная загрузка не требуется, если модели уже на месте.
+
+## English
+
+**Game build dated 2026-10-26 (buildid 26208975) is now supported.** The game updated again — the patcher was reworked against the actual files; the menu and commands are unchanged.
+
+- New patch-table entry: DLL hash (`3F51A7F9…`), updated `ScriptsAssDef.dll` / `Kolkata.Speech.dll`, edit offsets (−0xC20 shift vs 0.1.91) and the `CPU` / `Vulkan0` string tokens (`0x7003FC0F` / `0x7003FC17`) verified against the actual files.
+- The HardwareEligible method and the model-verification method are byte-identical to 0.1.91 except metadata tokens — confirmed by token-masked IL comparison.
+- All previous fixes carry over: 30/20 → 300 and 120 second timeouts, CPU/GPU selection, the model check bypass (Q4_K_M), and 3/10 second voice reference.
+
+**Update:** close the game, run `SwyfPatch.bat`, and choose **2 — Apply / update patch**. The worker and models are unchanged; no re-download is needed when models are already present.
+
+---
+
 # SwyfPatcher v2.9.5
 
 ## Русский
