@@ -1,4 +1,4 @@
-# SwyfPatcher 2.9.6
+# SwyfPatcher 2.9.7
 
 [![Русский](https://img.shields.io/badge/Русский-переключить-555?style=for-the-badge)](README.md)
 [![English](https://img.shields.io/badge/English-selected-2563eb?style=for-the-badge)](README.en.md)
@@ -14,6 +14,8 @@ An unofficial patcher for local **Qwen3 TTS** speech in **Scam With Your Friends
 3. Close the patcher and start the game **normally through Steam or its EXE**. Logs are saved automatically.
 
 Requires Windows 10/11 x64 and a supported game build. Checked against the **2026-10-26** build (buildid 26208975) as well as **0.1.91-swyf** and **0.1.89-swyf** files; unknown builds are left untouched. Applying the patch checks the active model and codec, restores them from a verified cache or downloads replacements. Internet is needed only for missing files (Q8 + codec: about 1.3 GB). After a game update, check compatibility again with option 1.
+
+**For 0.1.92:** fixed a separate queue timer that cancelled Qwen after 30 seconds without first audio. The limit is now 300 seconds; audio, an error, or hanging up still ends the wait immediately. This fixes premature cancellation, not synthesis speed.
 
 ## Menu
 

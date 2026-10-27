@@ -1,7 +1,7 @@
 @echo off
 setlocal
-title SwyfPatcher 2.9.6 - Qwen3 patch and diagnostics
-echo SwyfPatcher 2.9.6
+title SwyfPatcher 2.9.7 - Qwen3 patch and diagnostics
+echo SwyfPatcher 2.9.7
 set "SCRIPT=%~dp0src\SwyfPatch.ps1"
 if not exist "%SCRIPT%" (
     echo [FAIL] src\SwyfPatch.ps1 not found next to this launcher. Keep the repository layout intact.

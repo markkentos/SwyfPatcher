@@ -97,9 +97,27 @@ try {
             }
         }
     }
+    # Recreate exact released 2.9.6 variants, then exercise upgrade and restore through Get-Context.
+    foreach ($previous in $build.PreviousPatches) {
+        $oldPlan = Get-PatchPlan (Make-Context $original $build) $previous.Backend $previous.Reference
+        $oldBytes = [byte[]]$oldPlan.Output.Clone()
+        foreach ($edit in @($build.Edits | Where-Object { $_.QueueFirstAudio })) {
+            CopyInto $oldBytes $edit.o (HexToBytes $edit.b)
+        }
+        Assert ((Sha256Hex $oldBytes) -eq $previous.Hash) 'Exact released 2.9.6 fixture'
+        $states.Add(@{ Name = "v296-$($previous.Backend)-ref$($previous.Reference)"; Bytes = $oldBytes })
+    }
     foreach ($state in $states) {
         [IO.File]::WriteAllBytes($dll, $state.Bytes)
         $ctx = Get-Context $game
+        if ($state.Name -like 'v296-*') {
+            Assert ($ctx.Already -and -not $ctx.Legacy) 'Released 2.9.6 recognized as a valid patch'
+            $parts = $state.Name.Split('-')
+            Assert ($ctx.CurVariant -eq $parts[1]) 'Upgrade detects previous backend'
+            Assert ($ctx.ReferenceSeconds -eq [int]$parts[2].Substring(3)) 'Upgrade detects previous reference'
+            $keep = Get-PatchPlan $ctx '' $ctx.ReferenceSeconds
+            Assert ($keep.Backend -eq $ctx.CurVariant) 'Upgrade preserves backend'
+        }
         foreach ($backend in @('auto', 'cpu', 'vulkan')) {
             foreach ($reference in @(3, 10)) {
                 $plan = Get-PatchPlan $ctx $backend $reference
@@ -151,6 +169,20 @@ try {
     Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $RuntimeSpec.OriginalManifest) 'Restore recovers byte-identical original manifest'
     Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.OriginalWorker) 'Restore also restores original worker'
     Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Original) 'Restore ignores stale backup and restores exact original'
+    foreach ($state in @($states | Where-Object { $_.Name -like 'v296-*' })) {
+        [IO.File]::WriteAllBytes($dll, $state.Bytes)
+        Set-RuntimePlan (Get-RuntimePlan $game)
+        $previousBackend = (Get-Context $game).CurVariant
+        Invoke-MenuAction $game '2'
+        Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Patched[$previousBackend]) 'Menu 2 upgrades an installed 2.9.6 variant with the same backend'
+        Assert ((Get-FileHash -LiteralPath $workerPath).Hash -eq $RuntimeSpec.PatchedWorker) 'Upgrade preserves current worker'
+        Invoke-Restore (Get-Context $game)
+        Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Original) 'Upgraded 2.9.7 restores original DLL'
+        Assert ((Get-FileHash -LiteralPath $manifestPath).Hash -eq $RuntimeSpec.OriginalManifest) 'Upgraded 2.9.7 restores original manifest'
+        [IO.File]::WriteAllBytes($dll, $state.Bytes)
+        Invoke-Restore (Get-Context $game)
+        Assert ((Get-FileHash -LiteralPath $dll).Hash -eq $build.Original) '2.9.6 can also be restored directly'
+    }
     $bad = [byte[]]$original.Clone(); $bad[0] = 0
     [IO.File]::WriteAllBytes($dll, $bad)
     Assert-Throws { Get-Context $game } 'Unknown DLL rejected'

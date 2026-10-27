@@ -1,3 +1,41 @@
+# Проверки 2.9.7 / Validation
+
+## Русский
+
+Проверено 27 октября 2026 на файлах из `Scam With Your Friends (1).zip`. Активная DLL в архиве — оригинальная сборка 0.1.92 от 26 октября, SHA-256 `3F51A7F9224D40691C6D47F1E115E07268879595170912A7976BA5EC0F2F405E`. Зависимости и все 25 файлов runtime соответствуют таблице 2.9.6. Исходный архив и установленная локальная игра не менялись.
+
+В отчёте `diagnostics-20261027-185709-387-3370dd` первый запрос Qwen завершился с `first_audio_timeout` через 44,073 секунды общего времени. Изучение IL выявило отдельный 30-секундный таймер после подготовки провайдера: `PocketTtsSingleton` → `<ProcessSpeakQueue>b__6` → `HasSpeechStalled(..., false)`. Ранее изменённые внутренние таймауты Qwen этот предел не меняли. Второй запрос был отменён рядом с выходом из игры; доказательств срабатывания таймера для него нет.
+
+### Изменение и проверки
+
+- В новой сборке заменены 18 байт по смещению `0x3A564` в Qwen-предикате ожидания: проверяется `now - StartedAt >= 300`. Предшествующие проверки отмены, первого/буферизованного звука и ошибки сохранены. Общий `HasSpeechStalled` и остальные вызовы не изменены. Все шесть выходных хешей пересчитаны из оригинальной DLL.
+- **36 проверок исполнения реального IL:** оригинальный и изменённый методы извлекаются из PE, ссылки на поля и методы переназначаются изолированным объектам состояния и часам, затем код выполняется через .NET DynamicMethod. Проверены границы 30 и 300 секунд, воспроизведение случая 44 секунд, ненулевое начало запроса, немедленный выход при звуке/ошибке/отмене и неизменность общего таймера. Unity и native-синтез не запускаются.
+- **555 проверок патчера на предоставленной 0.1.92:** шесть вариантов 2.9.6 распознаются по их опубликованным хешам, обновляются через пункт 2 с сохранением CPU/GPU и восстанавливаются напрямую или после обновления. Проверены манифест, модели, бэкапы, ошибки записи, конкурентные изменения, меню RU/EN и диагностика.
+- **462 проверки на прежней 0.1.89**, включая оригинал от 22 октября: сохранена совместимость прежних вариантов и отката.
+
+Все записи тестов направлены во временные копии; загрузки и Windows process/registry API подменены. Воркер не пересобирался: SHA-256 `25F2FD20B795A60E360FD4D61537D458F3432663EFEA59B91F9E867908B21B8E`, версия 2.9.3.
+
+**Ещё требуется:** применение в Windows PowerShell 5.1 и повторный звонок на RTX 2070 SUPER. Подтверждено устранение ранней программной отмены, но не причина длительного native-вычисления и не получение первого аудио на этом GPU. Предельное ожидание остаётся конечным; завершение звонка не требует ждать 300 секунд.
+
+## English
+
+Checked on October 27, 2026 against `Scam With Your Friends (1).zip`. Its active DLL is the original 0.1.92 October 26 build, SHA-256 `3F51A7F9224D40691C6D47F1E115E07268879595170912A7976BA5EC0F2F405E`. Dependencies and all 25 runtime files match the 2.9.6 table. The source archive and local game installation were not modified.
+
+In `diagnostics-20261027-185709-387-3370dd`, the first Qwen request ended with `first_audio_timeout` after 44.073 seconds overall. IL inspection identified a separate 30-second timer after provider preparation: `PocketTtsSingleton` → `<ProcessSpeakQueue>b__6` → `HasSpeechStalled(..., false)`. The existing internal Qwen timeout edits did not affect it. The second request was cancelled near game exit; the log does not establish a timeout for that request.
+
+### Change and checks
+
+- Replaced 18 bytes at `0x3A564` in the Qwen wait predicate with `now - StartedAt >= 300`. Earlier cancellation, audio, buffer, and error checks remain intact. The shared `HasSpeechStalled` method and other callers are unchanged. All six output hashes were recomputed from the original DLL.
+- **36 actual IL execution checks:** read original/patched method bodies from PE, rebind metadata references to isolated clock/provider objects, and execute through .NET DynamicMethod. Covers the 30/300-second boundaries, the reported 44-second wait, nonzero request start, immediate audio/error/cancellation exits, and unchanged shared timer behavior. No Unity/native synthesis is involved.
+- **555 patcher assertions on the supplied 0.1.92:** recognize all six published 2.9.6 hashes, upgrade through option 2 while retaining CPU/GPU, and restore directly or after upgrading. Also covers manifests, models, backups, write failures, concurrent changes, RU/EN menu, and diagnostics.
+- **462 assertions on earlier 0.1.89 fixtures**, including the October 22 original, preserve earlier patch and restore compatibility.
+
+Tests write only temporary copies; downloads and Windows process/registry APIs are mocked. The worker was not rebuilt: version 2.9.3, SHA-256 `25F2FD20B795A60E360FD4D61537D458F3432663EFEA59B91F9E867908B21B8E`.
+
+**Still needed:** Windows PowerShell 5.1 installation and another call on RTX 2070 SUPER. The premature software cancellation is fixed in the tested IL, but the cause of slow native computation and successful first audio on that GPU remain unverified. The deadline remains finite; hanging up does not require waiting 300 seconds.
+
+---
+
 # Проверки 2.9.5 / Validation
 
 ## Русский

@@ -34,6 +34,16 @@ Every patch application, including CPU/GPU and model switches, verifies the acti
 
 All required downloads and cache copies are staged beside the models before DLL/runtime changes. Every source, including mirrors, must match the exact size and SHA-256. Original files are rechecked before replacement with backups. Failures roll back owned replacements and preserve concurrent changes. Corrupt originals remain as `.swyf-before-repair-…`. Healthy outgoing Q8/Q4 weights are cached; temporary rollback backups are removed after a successful switch. `--restore` leaves models unchanged.
 
+## Очередь Qwen в 0.1.92 / Qwen queue in 0.1.92
+
+В 2.9.7 у сборки `2026-10-26` изменён только Qwen-предикат `<ProcessSpeakQueue>b__6`: отдельный предел первого аудио согласован с внутренним таймаутом 300 секунд. Общий `HasSpeechStalled` оставлен штатным, чтобы не расширять таймеры MOSS и зависшего воспроизведения. Отмена, первое/буферизованное аудио и ошибка Qwen по-прежнему завершают ожидание немедленно. Для каждого входного/выходного варианта обязательны точные хеши; `PreviousPatches` хранит шесть известных вариантов 2.9.6 с их CPU/GPU и длительностью образца для обновления и отката.
+
+For build `2026-10-26`, 2.9.7 changes only the Qwen `<ProcessSpeakQueue>b__6` predicate, aligning the separate first-audio deadline with the internal 300-second timeout. The shared `HasSpeechStalled` method remains original so MOSS and stalled-playback limits stay unchanged. Cancellation, first/buffered audio, and Qwen errors still exit immediately. Exact input/output hashes remain mandatory; `PreviousPatches` retains all six known 2.9.6 variants and their backend/reference settings for upgrade and restore.
+
+`Test-QwenQueue.ps1` исполняет настоящий IL из DLL через DynamicMethod с подменёнными часами и состоянием провайдера. Нужны PowerShell 7 и файлы 0.1.92; этот тест не запускает Unity или GPU.
+
+`Test-QwenQueue.ps1` executes actual DLL IL through DynamicMethod with an isolated clock/provider state. It requires PowerShell 7 and the 0.1.92 files; it does not run Unity or GPU synthesis.
+
 ## Выбор GPU / GPU selection
 
 Игровой запрос `Vulkan0` означает режим GPU. Воркер загружает Vulkan-бэкенд, запрашивает устройства у того же реестра GGML, который использует Qwen, и передаёт выбранное имя (`Vulkan0`, `Vulkan1` и т. д.) через `GGML_BACKEND` до `qt_init`. Типы устройств из закреплённого ggml: `GPU=1`, `IGPU=2`. Приоритет: дискретная карта, затем общий объём памяти; равные варианты сохраняют порядок реестра. Название производителя не используется как эвристика. Переключатели Q4 выставляются до загрузки бэкенда.
@@ -70,6 +80,7 @@ pwsh -NoProfile -File tests/Test-GpuSelection.ps1
 pwsh -NoProfile -File tests/Test-ModelRepair.ps1
 pwsh -NoProfile -File tests/Test-AutomaticLogs.ps1
 pwsh -NoProfile -File tests/Test-SwyfPatch.ps1 -GameRoot "D:\Games\Scam With Your Friends"
+pwsh -NoProfile -File tests/Test-QwenQueue.ps1 -GameRoot "D:\Games\Scam With Your Friends"
 ```
 
 После пересборки обновите `RuntimeSpec.PatchedWorker` новым SHA-256. Старые выпущенные хеши должны оставаться в `PreviousWorkers`, чтобы обновление было возможно. Воркер и его запись в манифесте меняются вместе; проверка целостности не отключается.

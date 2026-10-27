@@ -3,7 +3,7 @@
 # Local 2.9 repair: valid VerifyAsync branch, original voice reference, safe menu and logs.
 # Dot-sourcing loads functions for tests; only direct execution enters the UI.
 $ErrorActionPreference = 'Stop'
-$Version = '2.9.6'
+$Version = '2.9.7'
 $GameName = 'Scam With Your Friends'
 $PatcherRoot = Split-Path -Parent $PSScriptRoot
 $SessionLog = $null
@@ -146,6 +146,12 @@ function Get-Context([string]$game) {
         foreach ($backend in @('auto', 'cpu', 'vulkan')) {
             if ($item.Patched[$backend] -eq $hash) { $build = $item; $variant = $backend; $reference = $item.DefaultReference; break }
             if ($item.Patched3 -and $item.Patched3[$backend] -eq $hash) { $build = $item; $variant = $backend; $reference = 3; break }
+        }
+        if ($build) { break }
+        foreach ($previous in $item.PreviousPatches) {
+            if ($previous.Hash -eq $hash) {
+                $build = $item; $variant = $previous.Backend; $reference = $previous.Reference; break
+            }
         }
         if ($build) { break }
         if ($LegacyPatched.ContainsKey($item.Original) -and $LegacyPatched[$item.Original].ContainsKey($hash)) {

@@ -1,3 +1,33 @@
+# SwyfPatcher v2.9.7
+
+## Русский
+
+**Исправлена преждевременная отмена первого звука Qwen в игре 0.1.92.** Патч подготовлен по DLL из предоставленной сборки от 26 октября. Эта сборка уже распознавалась 2.9.6; новое изменение исправляет её очередь озвучки.
+
+- Внутренний таймаут Qwen уже составлял 300 секунд, но отдельная очередь прекращала ожидание через 30 секунд. Теперь Qwen получает согласованный предел 300 секунд.
+- Отмена звонка, появление аудио и ошибка провайдера по-прежнему завершают ожидание сразу. Общая защита от остановки воспроизведения и таймеры MOSS не менялись.
+- Поддержаны обновление и прямой откат всех шести вариантов DLL от 2.9.6 для этой сборки. Меню, выбор CPU/GPU и модели сохранены.
+- Воркер остаётся 2.9.3; его номер в логе ожидаем. Исправные модели повторно скачивать не требуется.
+
+**Обновление:** распакуйте весь архив, закройте игру и выберите **2 — применить / обновить патч**. Для проверки отчёта с RTX 2070 SUPER оставьте Q8 + GPU, запустите игру как обычно и после выхода соберите логи пунктом **7**.
+
+Проверки установки и исполнения изменённого IL пройдены. Игра на Windows и синтез на RTX 2070 SUPER здесь не запускались. Увеличенный предел убирает раннюю отмену, но не доказывает устранение задержки GPU или ускорение генерации. Новая правка очереди относится к 0.1.92; патчи прежних сборок остаются прежними.
+
+## English
+
+**Fixed premature cancellation of Qwen's first audio in game 0.1.92.** Prepared against the supplied October 26 build DLLs. Version 2.9.6 already recognized this build; this update fixes its speech queue.
+
+- Qwen's internal timeout was already 300 seconds, but a separate queue stopped waiting after 30 seconds. The Qwen queue now uses the same 300-second limit.
+- Hanging up, available audio, and provider errors still end the wait immediately. The shared playback watchdog and MOSS timers are unchanged.
+- Supports upgrading and directly restoring all six 2.9.6 DLL variants for this build. The menu, model choice, and CPU/GPU choice are preserved.
+- The worker remains at 2.9.3; that log version is expected. Healthy models do not need to be downloaded again.
+
+**Update:** extract the complete archive, close the game, and select **2 — Apply / update patch**. To retest the RTX 2070 SUPER report, keep Q8 + GPU, launch normally, then collect logs with option **7** after exiting.
+
+Installation and execution of the modified IL passed local checks. The Windows game and RTX 2070 SUPER synthesis were not run here. The longer limit prevents premature cancellation but does not establish a GPU performance or generation-speed fix. The new queue change applies to 0.1.92; earlier build patches are unchanged.
+
+---
+
 # SwyfPatcher v2.9.6
 
 ## Русский
